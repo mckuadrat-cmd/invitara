@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import Papa from "papaparse";
 import {
@@ -15,6 +15,11 @@ import {
   Upload,
   Trash2,
   Plus,
+  Cross,
+  DeleteIcon,
+  Delete,
+  X,
+  Check,
 } from "lucide-react";
 import { Input } from "../../components/ui/input";
 import { Button } from "../../components/ui/button";
@@ -44,19 +49,37 @@ import {
   DialogTitle,
 } from "../../components/ui/dialog";
 
+import JSZip from "jszip";
+import { saveAs } from "file-saver";
+import { generateGuestTicketPdf } from "../../lib/pdf/generateGuestTicketPdf";
+import { toast } from "sonner";
+
 type GuestStatus = "registered" | "confirmed" | "checked_in";
 
 type GuestRow = {
   id: string;
   event_id: string;
+  identity_no: string | null;     // ✅ baru
   full_name: string;
   email: string | null;
   phone: string | null;
   organization: string | null;
+  dept_class: string | null;      // ✅ baru
   unique_code: string;
   status: GuestStatus;
   checkin_time: string | null;
   created_at: string;
+};
+
+type EventRow = {
+  id: string;
+  name: string;
+  slug: string;
+  event_date: string | null;
+  location: string | null;
+  status: string;
+  theme?: any;
+  event_code?: string | null;
 };
 
 function statusToUi(status: GuestRow["status"]) {
@@ -96,7 +119,28 @@ function normalizePhone(countryCode: string, raw: string) {
 }
 
 export default function GuestListPage() {
+  const [role, setRole] = useState<"owner" | "admin" | "scanner">("admin");
+    useEffect(() => {
+      (async () => {
+        const { data: sess } = await supabase.auth.getSession();
+        const uid = sess.session?.user?.id;
+        if (!uid) return;
+
+        const { data } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("user_id", uid)
+          .maybeSingle();
+
+        setRole((data?.role ?? "scanner") as any);
+      })();
+    }, []);
+
   const { eventId } = useParams();
+  const [event, setEvent] = useState<EventRow | null>(null);
+  const [qrFormat, setQrFormat] = useState<string>("QR Code v1");
+  const [downloadingAllPdf, setDownloadingAllPdf] = useState(false);
+  const [confirmingAll, setConfirmingAll] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<
@@ -110,17 +154,20 @@ export default function GuestListPage() {
   // Manual add
   const [adding, setAdding] = useState(false);
   const [newGuest, setNewGuest] = useState({
+    identity_no: "",
     full_name: "",
     email: "",
     organization: "",
+    dept_class: "",
     status: "confirmed" as GuestStatus,
     phoneCountry: "+62",
     phoneRaw: "",
   });
   const [deletingAll, setDeletingAll] = useState(false);
+  const importFileRef = useRef<HTMLInputElement | null>(null);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [confirmMode, setConfirmMode] = useState<"one" | "all">("one");
+  const [confirmMode, setConfirmMode] = useState<"one" | "all" | "confirm_all">("one");
   const [targetGuest, setTargetGuest] = useState<GuestRow | null>(null);
 
   // Email sending state
@@ -137,7 +184,7 @@ export default function GuestListPage() {
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
 
   function openTicket(uniqueCode: string) {
-    window.open(`/ticket/${encodeURIComponent(uniqueCode)}`, "_blank");
+    window.open(`/u/${encodeURIComponent(uniqueCode)}`, "_blank");
   }
 
   function onDeleteAll() {
@@ -146,7 +193,7 @@ export default function GuestListPage() {
     setConfirmOpen(true);
   }
 
-  async function runDeleteConfirmed() {
+  async function runConfirmedAction() {
     if (!eventId) return;
 
     setErr(null);
@@ -154,19 +201,34 @@ export default function GuestListPage() {
     try {
       if (confirmMode === "one") {
         if (!targetGuest) return;
+
         const { error } = await supabase.from("guests").delete().eq("id", targetGuest.id);
         if (error) throw error;
-      } else {
-        setDeletingAll(true);
-        const { error } = await supabase.from("guests").delete().eq("event_id", eventId);
-        if (error) throw error;
+
+        setConfirmOpen(false);
+        setTargetGuest(null);
+        await loadGuests();
+        return;
       }
 
-      setConfirmOpen(false);
-      setTargetGuest(null);
-      await loadGuests();
+      if (confirmMode === "all") {
+        setDeletingAll(true);
+
+        const { error } = await supabase.from("guests").delete().eq("event_id", eventId);
+        if (error) throw error;
+
+        setConfirmOpen(false);
+        setTargetGuest(null);
+        await loadGuests();
+        return;
+      }
+
+      if (confirmMode === "confirm_all") {
+        await confirmAllGuests();
+        return;
+      }
     } catch (e: any) {
-      setErr(e?.message ?? "Delete failed");
+      setErr(e?.message ?? "Action failed");
     } finally {
       setDeletingAll(false);
     }
@@ -219,10 +281,12 @@ export default function GuestListPage() {
 
       const payload: any = {
         event_id: eventId,
+        identity_no: newGuest.identity_no.trim() || null,
         full_name,
         email: newGuest.email.trim() || null,
         phone,
         organization: newGuest.organization.trim() || null,
+        dept_class: newGuest.dept_class.trim() || null,
         status: newGuest.status,
         // kalau DB lo sudah auto-generate unique_code via trigger, HAPUS ini.
         unique_code: makeCode(),
@@ -232,9 +296,11 @@ export default function GuestListPage() {
       if (error) throw error;
 
       setNewGuest({
+        identity_no: "",
         full_name: "",
         email: "",
         organization: "",
+        dept_class: "",
         status: "confirmed",
         phoneCountry: "+62",
         phoneRaw: "",
@@ -365,20 +431,24 @@ export default function GuestListPage() {
 
   const exportToCSV = () => {
     const headers = [
+      "No Identity",
       "full_name",
       "email",
       "phone",
       "organization",
+      "dept_class",
       "unique_code",
       "status",
       "checkin_time",
     ];
 
     const rows = filteredGuests.map((g) => [
+      g.identity_no ?? "",
       g.full_name,
       g.email ?? "",
       g.phone ?? "",
       g.organization ?? "",
+      g.dept_class ?? "",
       g.unique_code,
       g.status,
       g.checkin_time ?? "",
@@ -490,6 +560,156 @@ export default function GuestListPage() {
     alert(`Done.\nSent: ${sent}\nSkipped (no email): ${skipped}\nFailed: ${failed}`);
   }
 
+  async function loadEventMeta() {
+    if (!eventId) return;
+
+    const { data: ev, error: evErr } = await supabase
+      .from("events")
+      .select("id,name,slug,event_date,location,status,theme,event_code")
+      .eq("id", eventId)
+      .single();
+
+    if (evErr) throw evErr;
+    setEvent(ev as EventRow);
+
+    const { data: st } = await supabase
+      .from("event_settings")
+      .select("event_id,qr_format")
+      .eq("event_id", eventId)
+      .maybeSingle();
+
+    setQrFormat((st as any)?.qr_format ?? "QR Code v1");
+  }
+
+  useEffect(() => {
+    (async () => {
+      await Promise.all([loadGuests(), loadEventMeta()]);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventId]);
+
+  async function buildQrPayloadForGuest(guest: GuestRow) {
+    const origin = window.location.origin;
+
+    let qrPayload = `${origin}/admin/event/${guest.event_id}/scanner?code=${encodeURIComponent(
+      guest.unique_code
+    )}`;
+
+    if (qrFormat === "QR Code v2") {
+      qrPayload = JSON.stringify({
+        v: 2,
+        eventId: guest.event_id,
+        code: guest.unique_code,
+      });
+    }
+
+    if (qrFormat === "QR Code v3") {
+      const { data, error } = await supabase.functions.invoke("ticket_sign", {
+        body: { eventId: guest.event_id, code: guest.unique_code },
+      });
+
+      if (error) throw new Error(error.message);
+
+      const token = data?.token;
+      if (!token) throw new Error("Token QR tidak tersedia.");
+
+      qrPayload = `${origin}/admin/event/${guest.event_id}/scanner?t=${encodeURIComponent(token)}`;
+    }
+
+    return qrPayload;
+  }
+
+  async function downloadAllPdf() {
+    if (!eventId || !event) return;
+
+    try {
+      setErr(null);
+      setDownloadingAllPdf(true);
+      toast.loading("Sedang menyiapkan ZIP e-ticket...", { id: "zip-pdf" });
+
+      const confirmedGuests = filteredGuests.filter(
+        (g) => g.status === "confirmed" || g.status === "checked_in"
+      );
+
+      if (confirmedGuests.length === 0) {
+        toast.error("Tidak ada guest yang sudah konfirmasi untuk didownload.", {
+          id: "zip-pdf",
+        });
+        return;
+      }
+
+      const zip = new JSZip();
+
+      for (const guest of confirmedGuests) {
+        const pdfBlob = await generateGuestTicketPdf({
+          guest,
+          event,
+          buildQrPayload: () => buildQrPayloadForGuest(guest),
+          autoDownload: false,
+        });
+
+        if (pdfBlob) {
+          zip.file(`e-ticket-${guest.unique_code}-${guest.full_name.replace(/\s/g, '-')}.pdf`, pdfBlob);
+        }
+
+        await sleep(120);
+      }
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+
+      saveAs(
+        zipBlob,
+        `e-ticket-${event.event_code ?? event.name ?? "event"}-${confirmedGuests.length}.zip`
+      );
+
+      toast.success(`ZIP berhasil dibuat (${confirmedGuests.length} file).`, {
+        id: "zip-pdf",
+      });
+    } catch (e: any) {
+      setErr(e?.message ?? "Gagal download PDF all");
+      toast.error(e?.message ?? "Gagal download PDF all", {
+        id: "zip-pdf",
+      });
+    } finally {
+      setDownloadingAllPdf(false);
+    }
+  }
+
+  async function confirmAllGuests() {
+    if (!eventId) return;
+
+    const targetGuests = guests.filter((g) => g.status === "registered");
+
+    if (targetGuests.length === 0) {
+      setErr(null);
+      setConfirmOpen(false);
+      alert("Tidak ada guest yang perlu dikonfirmasi.");
+      return;
+    }
+
+    try {
+      setErr(null);
+      setConfirmingAll(true);
+
+      const { error } = await supabase
+        .from("guests")
+        .update({ status: "confirmed" })
+        .in(
+          "id",
+          targetGuests.map((g) => g.id)
+        );
+
+      if (error) throw error;
+
+      setConfirmOpen(false);
+      await loadGuests();
+    } catch (e: any) {
+      setErr(e?.message ?? "Gagal confirm all");
+    } finally {
+      setConfirmingAll(false);
+    }
+  }
+
   const total = guests.length;
   const checkedIn = guests.filter((g) => g.status === "checked_in").length;
   const confirmed = guests.filter((g) => g.status === "confirmed").length;
@@ -576,17 +796,20 @@ export default function GuestListPage() {
             Refresh
           </Button>
 
-          <Button
-            onClick={exportToCSV}
-            className="bg-[#0F1C2E] hover:bg-[#0F1C2E]/90 text-white"
-            disabled={loading}
-          >
-            <Download className="w-4 h-4 mr-2" />
-            Export CSV
-          </Button>
+          {role === "owner" && (
+            <Button
+              onClick={exportToCSV}
+              className="bg-[#0F1C2E] hover:bg-[#0F1C2E]/90 text-white"
+              disabled={loading}
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Export CSV
+            </Button>
+          )}
 
           <label className="inline-flex items-center">
             <input
+              ref={importFileRef}
               type="file"
               accept=".csv"
               className="hidden"
@@ -598,11 +821,13 @@ export default function GuestListPage() {
                 e.currentTarget.value = "";
               }}
             />
+
             <Button
               type="button"
               variant="outline"
               className="border-[#0F1C2E]/20"
               disabled={loading}
+              onClick={() => importFileRef.current?.click()}
             >
               <Upload className="w-4 h-4 mr-2" />
               Import CSV
@@ -624,15 +849,43 @@ export default function GuestListPage() {
             {bulkSending ? "Sending..." : "Send All (Filtered)"}
           </Button>
 
-          <Button
-            onClick={onDeleteAll}
-            variant="outline"
-            className="border-red-200 text-red-700 hover:bg-red-50"
-            disabled={loading || deletingAll}
-          >
-            <Trash2 className="w-4 h-4 mr-2" />
-            {deletingAll ? "Deleting..." : "Delete All"}
-          </Button>
+          {role === "owner" && (
+            <Button
+              onClick={() => {
+                setConfirmMode("confirm_all");
+                setTargetGuest(null);
+                setConfirmOpen(true);
+              }}
+              className="bg-[#0F1C2E] text-white hover:bg-[#0F1C2E]/90"
+              disabled={loading || confirmingAll}
+            >
+              <Check className="w-4 h-4 mr-2" />
+              {confirmingAll ? "Confirming..." : "Confirm All"}
+            </Button>
+          )}
+
+          {role === "owner" && (
+            <Button
+              onClick={downloadAllPdf}
+              className="bg-[#D6C6A5] text-[#0F1C2E] hover:opacity-90"
+              disabled={loading || downloadingAllPdf || !event}
+            >
+              <Download className="w-4 h-4 mr-2" />
+              {downloadingAllPdf ? "Preparing ZIP..." : "Download PDF All"}
+            </Button>
+          )}
+
+          {role === "owner" && (
+            <Button
+              onClick={onDeleteAll}
+              variant="outline"
+              className="border-red-200 text-red-700 hover:bg-red-50"
+              disabled={loading || deletingAll}
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              {deletingAll ? "Deleting..." : "Delete All"}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -656,7 +909,11 @@ export default function GuestListPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {confirmMode === "all" ? "Delete all guests?" : "Delete guest?"}
+              {confirmMode === "all"
+                ? "Delete all guests?"
+                : confirmMode === "confirm_all"
+                ? "Confirm all guests?"
+                : "Delete guest?"}
             </DialogTitle>
           </DialogHeader>
 
@@ -664,6 +921,11 @@ export default function GuestListPage() {
             {confirmMode === "all" ? (
               <>
                 Ini akan menghapus <b>SEMUA</b> guest untuk event ini. Aksi ini tidak bisa dibatalkan.
+              </>
+            ) : confirmMode === "confirm_all" ? (
+              <>
+                Ini akan mengubah semua guest dengan status <b>registered</b> menjadi <b>confirmed</b>.
+                Guest yang sudah <b>confirmed</b> atau <b>checked_in</b> tidak akan berubah.
               </>
             ) : (
               <>
@@ -677,11 +939,19 @@ export default function GuestListPage() {
               Cancel
             </Button>
             <Button
-              className="bg-red-600 hover:bg-red-700 text-white"
-              onClick={runDeleteConfirmed}
-              disabled={deletingAll}
+              className={
+                confirmMode === "confirm_all"
+                  ? "bg-[#0F1C2E] hover:bg-[#0F1C2E]/90 text-white"
+                  : "bg-red-600 hover:bg-red-700 text-white"
+              }
+              onClick={runConfirmedAction}
+              disabled={deletingAll || confirmingAll}
             >
-              Delete
+              {confirmMode === "confirm_all"
+                ? confirmingAll
+                  ? "Confirming..."
+                  : "Confirm All"
+                : "Delete"}
             </Button>
           </div>
         </DialogContent>
@@ -708,7 +978,14 @@ export default function GuestListPage() {
             </Button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
+            <Input
+              placeholder="No Identity"
+              value={newGuest.identity_no}
+              onChange={(e) =>
+                setNewGuest((p) => ({ ...p, identity_no: e.target.value }))
+              }
+            />
             <Input
               placeholder="Full name *"
               value={newGuest.full_name}
@@ -747,6 +1024,14 @@ export default function GuestListPage() {
               placeholder="Organization"
               value={newGuest.organization}
               onChange={(e) => setNewGuest((p) => ({ ...p, organization: e.target.value }))}
+            />
+
+            <Input
+              placeholder="Dept / Class"
+              value={newGuest.dept_class}
+              onChange={(e) =>
+                setNewGuest((p) => ({ ...p, dept_class: e.target.value }))
+              }
             />
 
             <Select
@@ -844,10 +1129,12 @@ export default function GuestListPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="text-[#0F1C2E]">No Identity</TableHead>
                   <TableHead className="text-[#0F1C2E]">Name</TableHead>
                   <TableHead className="text-[#0F1C2E]">Email</TableHead>
                   <TableHead className="text-[#0F1C2E]">Phone</TableHead>
                   <TableHead className="text-[#0F1C2E]">Organization</TableHead>
+                  <TableHead className="text-[#0F1C2E]">Dept/Class</TableHead>
                   <TableHead className="text-[#0F1C2E]">Unique Code</TableHead>
                   <TableHead className="text-[#0F1C2E]">Status</TableHead>
                   <TableHead className="text-[#0F1C2E]">Check-in Time</TableHead>
@@ -858,13 +1145,13 @@ export default function GuestListPage() {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-12 text-gray-500">
+                    <TableCell colSpan={10} className="text-center py-12 text-gray-500">
                       Loading guests...
                     </TableCell>
                   </TableRow>
                 ) : filteredGuests.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-12 text-gray-500">
+                    <TableCell colSpan={10} className="text-center py-12 text-gray-500">
                       No guests found matching your criteria
                     </TableCell>
                   </TableRow>
@@ -875,12 +1162,14 @@ export default function GuestListPage() {
 
                     return (
                       <TableRow key={g.id} className="hover:bg-[#F5F7FA]/50">
+                        <TableCell className="font-medium text-[#0F1C2E]">{g.identity_no ?? "—"}</TableCell>
                         <TableCell className="font-medium text-[#0F1C2E]">
                           {g.full_name}
                         </TableCell>
                         <TableCell className="text-gray-600">{g.email ?? "—"}</TableCell>
                         <TableCell className="text-gray-600">{g.phone ?? "—"}</TableCell>
                         <TableCell className="text-gray-600">{g.organization ?? "—"}</TableCell>
+                        <TableCell className="text-gray-600">{g.dept_class ?? "—"}</TableCell>
                         <TableCell>
                           <code className="bg-gray-100 px-2 py-1 rounded text-sm">
                             {g.unique_code}
@@ -921,7 +1210,6 @@ export default function GuestListPage() {
                               title="Open digital ticket"
                             >
                               <ExternalLink className="w-4 h-4 mr-2" />
-                              Open
                             </Button>
 
                             <Button
@@ -947,8 +1235,7 @@ export default function GuestListPage() {
                               }}
                               title="Delete guest"
                             >
-                              <Trash2 className="w-4 h-4 mr-2" />
-                              Delete
+                              <X className="w-4 h-4 mr-2" />
                             </Button>
                           </div>
                         </TableCell>

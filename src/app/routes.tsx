@@ -4,6 +4,7 @@ import { createBrowserRouter, Navigate } from "react-router-dom";
 import PublicLandingPage from "./pages/PublicLandingPage";
 import PublicEventPage from "./pages/PublicEventPage";
 import DigitalTicketPage from "./pages/DigitalTicketPage";
+import GuestInvitationPage from "./pages/GuestInvitationPage";
 
 import AdminLayout from "./pages/admin/AdminLayout";
 import DashboardPage from "./pages/admin/DashboardPage";
@@ -32,6 +33,7 @@ export const router = createBrowserRouter([
   { path: "/", element: <PublicLandingPage /> },
   { path: "/event/:slug", element: <PublicEventPage /> },
   { path: "/ticket/:id", element: <DigitalTicketPage /> },
+  { path: "/u/:code", element: <GuestInvitationPage /> },
 
   // Auth
   { path: "/login", element: <LoginPage /> },

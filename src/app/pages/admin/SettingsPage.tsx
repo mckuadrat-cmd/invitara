@@ -1,16 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
 import {
   Save,
   Mail,
   Calendar,
-  MapPin,
   QrCode,
   Palette,
   Plus,
   ArrowUp,
   ArrowDown,
   Trash2,
+  Upload,
+  Image as ImageIcon,
+  X,
 } from "lucide-react";
 import {
   Card,
@@ -33,12 +35,14 @@ import {
 import { supabase } from "../../lib/supabaseClient";
 import { toast } from "sonner";
 
+const STORAGE_BUCKET = "event-assets";
+
 type EventRow = {
   id: string;
   name: string;
   event_date: string | null;
   location: string | null;
-  theme: any; // jsonb
+  theme: any;
 };
 
 type EventSettingsRow = {
@@ -50,7 +54,8 @@ type EventSettingsRow = {
 };
 
 type AgendaItem = {
-  time: string;
+  start_time: string;
+  end_time: string;
   title: string;
   note?: string;
 };
@@ -60,34 +65,261 @@ type FaqItem = {
   a: string;
 };
 
+type GradientStop = {
+  id: string;
+  color: string;
+  position: number;
+};
+
+function isoToLocalInput(value?: string | null) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+    d.getHours()
+  )}:${pad(d.getMinutes())}`;
+}
+
+function uid() {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+function clamp(num: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, num));
+}
+
+function buildGradientCss(
+  type: "linear" | "radial",
+  angle: number,
+  stops: GradientStop[]
+) {
+  const sorted = [...stops].sort((a, b) => a.position - b.position);
+  const stopText = sorted.map((s) => `${s.color} ${s.position}%`).join(", ");
+
+  if (type === "radial") {
+    return `radial-gradient(circle, ${stopText})`;
+  }
+
+  return `linear-gradient(${angle}deg, ${stopText})`;
+}
+
+function hexToRgb(hex: string, fallback = { r: 15, g: 28, b: 46 }) {
+  const clean = String(hex || "").replace("#", "").trim();
+
+  if (clean.length === 3) {
+    const r = parseInt(clean[0] + clean[0], 16);
+    const g = parseInt(clean[1] + clean[1], 16);
+    const b = parseInt(clean[2] + clean[2], 16);
+    if ([r, g, b].some(Number.isNaN)) return fallback;
+    return { r, g, b };
+  }
+
+  if (clean.length === 6) {
+    const r = parseInt(clean.slice(0, 2), 16);
+    const g = parseInt(clean.slice(2, 4), 16);
+    const b = parseInt(clean.slice(4, 6), 16);
+    if ([r, g, b].some(Number.isNaN)) return fallback;
+    return { r, g, b };
+  }
+
+  return fallback;
+}
+
+function rgbaFromHex(hex: string, alpha: number) {
+  const { r, g, b } = hexToRgb(hex, { r: 15, g: 28, b: 46 });
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function isDarkColor(hex: string) {
+  const { r, g, b } = hexToRgb(hex, { r: 15, g: 28, b: 46 });
+  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+  return brightness < 155;
+}
+
 export default function SettingsPage() {
   const { eventId } = useParams();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [uploadingHero, setUploadingHero] = useState(false);
 
   const [eventName, setEventName] = useState("");
-  const [eventDate, setEventDate] = useState(""); // datetime-local string
+  const [eventStartDate, setEventStartDate] = useState("");
+  const [eventEndDate, setEventEndDate] = useState("");
+
   const [location, setLocation] = useState("");
+  const [locationName, setLocationName] = useState("");
+  const [locationAddress, setLocationAddress] = useState("");
 
   const [qrFormat, setQrFormat] = useState("QR Code v1");
   const [autoEmail, setAutoEmail] = useState(false);
   const [allowReentry, setAllowReentry] = useState(false);
   const [vipBadgeColor, setVipBadgeColor] = useState("#D6C6A5");
 
-  // Invitation Theme (events.theme)
   const [themePrimary, setThemePrimary] = useState("#0F1C2E");
   const [themeAccent, setThemeAccent] = useState("#D6C6A5");
+
+  const [themeGradientType, setThemeGradientType] = useState<"linear" | "radial">("linear");
+  const [themeGradientAngle, setThemeGradientAngle] = useState("135");
+  const [themeGradientStops, setThemeGradientStops] = useState<GradientStop[]>([
+    { id: uid(), color: "#0F1C2E", position: 0 },
+    { id: uid(), color: "#0B1220", position: 100 },
+  ]);
+
+  const [themePageBaseColor, setThemePageBaseColor] = useState("#0F1C2E");
+  const [themeCardColorHex, setThemeCardColorHex] = useState("#FFFFFF");
+  const [themeCardOpacity, setThemeCardOpacity] = useState("8");
+
   const [themeLogoUrl, setThemeLogoUrl] = useState("/Invitara.png");
   const [themeHeroUrl, setThemeHeroUrl] = useState("");
+
+  const [themeButtonPrimaryBg, setThemeButtonPrimaryBg] = useState("#D6C6A5");
+  const [themeButtonPrimaryText, setThemeButtonPrimaryText] = useState("#0B1220");
+  const [themeButtonSecondaryBg, setThemeButtonSecondaryBg] = useState("#FFFFFF");
+  const [themeButtonSecondaryText, setThemeButtonSecondaryText] = useState("#0F1C2E");
+
   const [themeTagline, setThemeTagline] = useState("PELEPASAN & APRESIASI");
   const [themeHeadline, setThemeHeadline] = useState("");
   const [themeAbout, setThemeAbout] = useState("");
-  const [themeDresscode, setThemeDresscode] = useState("Formal / Batik");
 
-  // Builder arrays (no JSON)
+  const [themeHostName, setThemeHostName] = useState("");
+  const [themeSalam, setThemeSalam] = useState("Assalamualaikum Wr. Wb.");
+  const [themeGuestGreeting, setThemeGuestGreeting] = useState("Orang Tua/Wali Murid");
+  const [themeDresscodeMale, setThemeDresscodeMale] = useState("Kemeja batik / formal");
+  const [themeDresscodeFemale, setThemeDresscodeFemale] = useState("Busana sopan / formal");
+  const [themeClosingText, setThemeClosingText] = useState(
+    "Merupakan suatu kehormatan dan kebahagiaan bagi kami apabila Bapak/Ibu berkenan hadir. Atas perhatian dan kehadirannya, kami ucapkan terima kasih."
+  );
+
+  const [themeHeroMode, setThemeHeroMode] = useState<
+    "image" | "gradient" | "image-overlay" | "image-gradient-blend"
+  >("image-overlay");
+
+  const [themeHeroHeight, setThemeHeroHeight] = useState("560");
+  const [themeHeroOverlayColor, setThemeHeroOverlayColor] = useState("#0F1C2E");
+  const [themeHeroOverlayOpacity, setThemeHeroOverlayOpacity] = useState("58");
+  const [themeHeroImagePosition, setThemeHeroImagePosition] = useState("center center");
+  const [themeHeroImageSize, setThemeHeroImageSize] = useState("cover");
+
+  const [themeHeroGlowEnabled, setThemeHeroGlowEnabled] = useState(true);
+  const [themeHeroGlowColor, setThemeHeroGlowColor] = useState("#D6C6A5");
+  const [themeHeroGlowX, setThemeHeroGlowX] = useState("20");
+  const [themeHeroGlowY, setThemeHeroGlowY] = useState("10");
+  const [themeHeroGlowSizeX, setThemeHeroGlowSizeX] = useState("900");
+  const [themeHeroGlowSizeY, setThemeHeroGlowSizeY] = useState("500");
+  const [themeHeroGlowOpacityHex, setThemeHeroGlowOpacityHex] = useState("22");
+
   const [agendaItems, setAgendaItems] = useState<AgendaItem[]>([]);
   const [faqItems, setFaqItems] = useState<FaqItem[]>([]);
+
+  const gradientPreview = useMemo(() => {
+    return buildGradientCss(
+      themeGradientType,
+      Number(themeGradientAngle || 135),
+      themeGradientStops
+    );
+  }, [themeGradientType, themeGradientAngle, themeGradientStops]);
+
+  const cardPreview = useMemo(() => {
+    const opacity = clamp(Number(themeCardOpacity || 8), 0, 100) / 100;
+    return rgbaFromHex(themeCardColorHex, opacity);
+  }, [themeCardColorHex, themeCardOpacity]);
+
+  const autoTextMode = useMemo(() => isDarkColor(themePageBaseColor), [themePageBaseColor]);
+
+  async function uploadAsset(file: File, folder: "logos" | "heroes") {
+    if (!eventId) throw new Error("Event ID tidak ditemukan.");
+
+    const ext = file.name.split(".").pop() || "png";
+    const safeExt = ext.toLowerCase();
+    const fileName = `${eventId}/${folder}/${Date.now()}-${uid()}.${safeExt}`;
+
+    const { error } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .upload(fileName, file, { upsert: true });
+
+    if (error) throw error;
+
+    const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(fileName);
+    return data.publicUrl;
+  }
+
+  async function handleLogoUpload(file?: File | null) {
+    if (!file) return;
+    try {
+      setUploadingLogo(true);
+      const publicUrl = await uploadAsset(file, "logos");
+      setThemeLogoUrl(publicUrl);
+      toast.success("Logo berhasil diupload");
+    } catch (e: any) {
+      toast.error(e?.message ?? "Upload logo gagal");
+    } finally {
+      setUploadingLogo(false);
+    }
+  }
+
+  async function handleHeroUpload(file?: File | null) {
+    if (!file) return;
+    try {
+      setUploadingHero(true);
+      const publicUrl = await uploadAsset(file, "heroes");
+      setThemeHeroUrl(publicUrl);
+      toast.success("Backgrounq image berhasil diupload");
+    } catch (e: any) {
+      toast.error(e?.message ?? "Upload background image gagal");
+    } finally {
+      setUploadingHero(false);
+    }
+  }
+
+  function addGradientStop() {
+    setThemeGradientStops((prev) => {
+      const sorted = [...prev].sort((a, b) => a.position - b.position);
+      const last = sorted[sorted.length - 1];
+      const nextPos = last ? clamp(last.position - 10, 0, 100) : 50;
+
+      return [
+        ...prev,
+        {
+          id: uid(),
+          color: "#ffffff",
+          position: nextPos,
+        },
+      ].sort((a, b) => a.position - b.position);
+    });
+  }
+
+  function updateGradientStop(id: string, patch: Partial<GradientStop>) {
+    setThemeGradientStops((prev) =>
+      prev
+        .map((stop) =>
+          stop.id === id
+            ? {
+                ...stop,
+                ...patch,
+                position:
+                  patch.position !== undefined
+                    ? clamp(Number(patch.position), 0, 100)
+                    : stop.position,
+              }
+            : stop
+        )
+        .sort((a, b) => a.position - b.position)
+    );
+  }
+
+  function removeGradientStop(id: string) {
+    setThemeGradientStops((prev) => {
+      if (prev.length <= 2) {
+        toast.message("Minimal harus ada 2 titik gradasi");
+        return prev;
+      }
+      return prev.filter((s) => s.id !== id).sort((a, b) => a.position - b.position);
+    });
+  }
 
   async function loadAll() {
     if (!eventId) return;
@@ -107,20 +339,100 @@ export default function SettingsPage() {
     }
 
     const e = ev.data as EventRow;
-    setEventName(e.name ?? "");
-    setLocation(e.location ?? "");
+    const t = (e as any).theme ?? {};
+    const brand = t.brand ?? t ?? {};
+    const colors = t.colors ?? {};
+    const buttons = t.buttons ?? {};
+    const locationData = t.locationData ?? {};
+    const gradient = colors.gradient ?? {};
+    const hero = t.hero ?? {};
 
-    // ISO -> datetime-local (YYYY-MM-DDTHH:mm)
-    if (e.event_date) {
-      const d = new Date(e.event_date);
-      const pad = (n: number) => String(n).padStart(2, "0");
-      const local = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(
-        d.getDate()
-      )}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-      setEventDate(local);
-    } else {
-      setEventDate("");
-    }
+    setEventName(e.name ?? "");
+    setEventStartDate(isoToLocalInput(e.event_date));
+    setEventEndDate(isoToLocalInput(t.eventEndDate));
+
+    setLocation(e.location ?? "");
+    setLocationName(locationData.name ?? "");
+    setLocationAddress(locationData.address ?? e.location ?? "");
+
+    setThemePrimary(brand.primary ?? "#0F1C2E");
+    setThemeAccent(brand.accent ?? "#D6C6A5");
+    setThemeLogoUrl(brand.logoUrl ?? "/Invitara.png");
+
+    setThemeGradientType(gradient.type ?? "linear");
+    setThemeGradientAngle(String(gradient.angle ?? 135));
+    setThemeGradientStops(
+      Array.isArray(gradient.stops) && gradient.stops.length >= 2
+        ? gradient.stops.map((stop: any) => ({
+            id: uid(),
+            color: stop.color ?? "#000000",
+            position: clamp(Number(stop.position ?? 0), 0, 100),
+          }))
+        : [
+            { id: uid(), color: "#0F1C2E", position: 0 },
+            { id: uid(), color: "#0B1220", position: 100 },
+          ]
+    );
+
+    setThemePageBaseColor(colors.pageBaseColor ?? brand.primary ?? "#0F1C2E");
+    setThemeCardColorHex(colors.cardColorHex ?? "#FFFFFF");
+    setThemeCardOpacity(String(colors.cardOpacity ?? 8));
+
+    setThemeButtonPrimaryBg(buttons.primaryBg ?? "#D6C6A5");
+    setThemeButtonPrimaryText(buttons.primaryText ?? "#0B1220");
+    setThemeButtonSecondaryBg(buttons.secondaryBg ?? "#FFFFFF");
+    setThemeButtonSecondaryText(buttons.secondaryText ?? "#0F1C2E");
+
+    setThemeTagline(t.tagline ?? "PELEPASAN & APRESIASI");
+    setThemeHeadline(t.headline ?? e.name ?? "");
+    setThemeAbout(
+      t.about ?? "Dengan hormat, kami mengundang Bapak/Ibu untuk menghadiri acara ini."
+    );
+
+    setThemeHostName(t.hostName ?? "");
+    setThemeSalam(t.salam ?? "Assalamualaikum Wr. Wb.");
+    setThemeGuestGreeting(t.guestGreeting ?? "Orang Tua/Wali Murid");
+    setThemeDresscodeMale(t.dresscodeMale ?? "Kemeja batik / formal");
+    setThemeDresscodeFemale(t.dresscodeFemale ?? "Busana sopan / formal");
+    setThemeClosingText(
+      t.closingText ??
+        "Merupakan suatu kehormatan dan kebahagiaan bagi kami apabila Bapak/Ibu berkenan hadir. Atas perhatian dan kehadirannya, kami ucapkan terima kasih."
+    );
+
+    setThemeHeroUrl(hero.imageUrl ?? brand.heroImageUrl ?? "");
+    setThemeHeroMode(hero.mode ?? (hero.imageUrl || brand.heroImageUrl ? "image-overlay" : "gradient"));
+    setThemeHeroHeight(String(hero.height ?? 560));
+    setThemeHeroOverlayColor(hero.overlayColor ?? colors.pageBaseColor ?? brand.primary ?? "#0F1C2E");
+    setThemeHeroOverlayOpacity(
+      String(
+        typeof hero.overlayOpacity === "number"
+          ? Math.round(hero.overlayOpacity * 100)
+          : 58
+      )
+    );
+    setThemeHeroImagePosition(hero.imagePosition ?? "center center");
+    setThemeHeroImageSize(hero.imageSize ?? "cover");
+
+    setThemeHeroGlowEnabled(hero.glow?.enabled ?? true);
+    setThemeHeroGlowColor(hero.glow?.color ?? brand.accent ?? "#D6C6A5");
+    setThemeHeroGlowX(String(hero.glow?.x ?? 20));
+    setThemeHeroGlowY(String(hero.glow?.y ?? 10));
+    setThemeHeroGlowSizeX(String(hero.glow?.sizeX ?? 900));
+    setThemeHeroGlowSizeY(String(hero.glow?.sizeY ?? 500));
+    setThemeHeroGlowOpacityHex(hero.glow?.opacityHex ?? "22");
+
+    setAgendaItems(
+      Array.isArray(t.agenda)
+        ? t.agenda.map((item: any) => ({
+            start_time: item.start_time ?? "",
+            end_time: item.end_time ?? "",
+            title: item.title ?? "",
+            note: item.note ?? "",
+          }))
+        : []
+    );
+
+    setFaqItems(Array.isArray(t.faqs) ? t.faqs : []);
 
     const st = await supabase
       .from("event_settings")
@@ -141,26 +453,6 @@ export default function SettingsPage() {
       setVipBadgeColor("#D6C6A5");
     }
 
-    // Theme
-    const t = (e as any).theme ?? {};
-    const brand = t.brand ?? t ?? {};
-
-    setThemePrimary(brand.primary ?? "#0F1C2E");
-    setThemeAccent(brand.accent ?? "#D6C6A5");
-    setThemeLogoUrl(brand.logoUrl ?? "/Invitara.png");
-    setThemeHeroUrl(brand.heroImageUrl ?? "");
-
-    setThemeTagline(t.tagline ?? "PELEPASAN & APRESIASI");
-    setThemeHeadline(t.headline ?? e.name ?? "");
-    setThemeAbout(
-      t.about ??
-        "Dengan hormat, kami mengundang Bapak/Ibu untuk menghadiri acara ini."
-    );
-    setThemeDresscode(t.dresscode ?? "Formal / Batik");
-
-    setAgendaItems(Array.isArray(t.agenda) ? t.agenda : []);
-    setFaqItems(Array.isArray(t.faqs) ? t.faqs : []);
-
     setLoading(false);
   }
 
@@ -174,19 +466,76 @@ export default function SettingsPage() {
     setSaving(true);
 
     try {
-      const isoDate = eventDate ? new Date(eventDate).toISOString() : null;
+      const isoStartDate = eventStartDate ? new Date(eventStartDate).toISOString() : null;
+      const isoEndDate = eventEndDate ? new Date(eventEndDate).toISOString() : null;
+
+      const finalLocation = locationAddress || location || "";
+      const gradientAngleNum = Number(themeGradientAngle || 135);
+      const finalCardOpacity = clamp(Number(themeCardOpacity || 8), 0, 100);
+
+      const finalHeroHeight = clamp(Number(themeHeroHeight || 560), 280, 1200);
+      const finalHeroOverlayOpacity = clamp(Number(themeHeroOverlayOpacity || 58), 0, 100) / 100;
 
       const themeToSave = {
         brand: {
           primary: themePrimary,
           accent: themeAccent,
           logoUrl: themeLogoUrl,
-          heroImageUrl: themeHeroUrl || null,
+        },
+        hero: {
+          mode: themeHeroMode,
+          imageUrl: themeHeroUrl || null,
+          height: finalHeroHeight,
+          overlayColor: themeHeroOverlayColor,
+          overlayOpacity: finalHeroOverlayOpacity,
+          imagePosition: themeHeroImagePosition || "center center",
+          imageSize: themeHeroImageSize,
+          glow: {
+            enabled: themeHeroGlowEnabled,
+            color: themeHeroGlowColor,
+            x: clamp(Number(themeHeroGlowX || 20), 0, 100),
+            y: clamp(Number(themeHeroGlowY || 10), 0, 100),
+            sizeX: clamp(Number(themeHeroGlowSizeX || 900), 100, 3000),
+            sizeY: clamp(Number(themeHeroGlowSizeY || 500), 100, 3000),
+            opacityHex: themeHeroGlowOpacityHex || "22",
+          },
+        },
+        colors: {
+          pageBaseColor: themePageBaseColor,
+          gradient: {
+            type: themeGradientType,
+            angle: Number.isNaN(gradientAngleNum) ? 135 : gradientAngleNum,
+            stops: themeGradientStops
+              .map((s) => ({
+                color: s.color,
+                position: clamp(Number(s.position), 0, 100),
+              }))
+              .sort((a, b) => a.position - b.position),
+          },
+          cardColorHex: themeCardColorHex,
+          cardOpacity: finalCardOpacity,
+          cardColor: rgbaFromHex(themeCardColorHex, finalCardOpacity / 100),
+        },
+        buttons: {
+          primaryBg: themeButtonPrimaryBg,
+          primaryText: themeButtonPrimaryText,
+          secondaryBg: themeButtonSecondaryBg,
+          secondaryText: themeButtonSecondaryText,
         },
         tagline: themeTagline,
         headline: themeHeadline || eventName,
         about: themeAbout,
-        dresscode: themeDresscode,
+        hostName: themeHostName,
+        salam: themeSalam,
+        guestGreeting: themeGuestGreeting,
+        dresscodeMale: themeDresscodeMale,
+        dresscodeFemale: themeDresscodeFemale,
+        closingText: themeClosingText,
+        eventEndDate: isoEndDate,
+        locationData: {
+          name: locationName,
+          address: locationAddress || finalLocation,
+        },
         agenda: agendaItems,
         faqs: faqItems,
       };
@@ -195,8 +544,8 @@ export default function SettingsPage() {
         .from("events")
         .update({
           name: eventName,
-          event_date: isoDate,
-          location: location,
+          event_date: isoStartDate,
+          location: finalLocation || null,
           theme: themeToSave,
         })
         .eq("id", eventId);
@@ -218,7 +567,7 @@ export default function SettingsPage() {
 
       if (upSt.error) throw new Error(upSt.error.message);
 
-      toast.success("Settings saved successfully!");
+      toast.success("Settings berhasil disimpan");
     } catch (e: any) {
       toast.error(e?.message ?? "Save failed");
     } finally {
@@ -226,7 +575,6 @@ export default function SettingsPage() {
     }
   }
 
-  // ---------- Builder helpers ----------
   function move<T>(arr: T[], from: number, to: number) {
     if (to < 0 || to >= arr.length) return arr;
     const copy = [...arr];
@@ -240,15 +588,22 @@ export default function SettingsPage() {
       prev.map((it, i) => (i === idx ? { ...it, ...patch } : it))
     );
   }
+
   function addAgenda() {
-    setAgendaItems((prev) => [...prev, { time: "", title: "", note: "" }]);
+    setAgendaItems((prev) => [
+      ...prev,
+      { start_time: "", end_time: "", title: "", note: "" },
+    ]);
   }
+
   function removeAgenda(idx: number) {
     setAgendaItems((prev) => prev.filter((_, i) => i !== idx));
   }
+
   function upAgenda(idx: number) {
     setAgendaItems((prev) => move(prev, idx, idx - 1));
   }
+
   function downAgenda(idx: number) {
     setAgendaItems((prev) => move(prev, idx, idx + 1));
   }
@@ -258,31 +613,33 @@ export default function SettingsPage() {
       prev.map((it, i) => (i === idx ? { ...it, ...patch } : it))
     );
   }
+
   function addFaq() {
     setFaqItems((prev) => [...prev, { q: "", a: "" }]);
   }
+
   function removeFaq(idx: number) {
     setFaqItems((prev) => prev.filter((_, i) => i !== idx));
   }
+
   function upFaq(idx: number) {
     setFaqItems((prev) => move(prev, idx, idx - 1));
   }
+
   function downFaq(idx: number) {
     setFaqItems((prev) => move(prev, idx, idx + 1));
   }
-  // -----------------------------------
 
   if (!eventId) return <div className="p-4">Missing eventId in route.</div>;
 
   return (
-    <div className="max-w-4xl">
+    <div className="max-w-5xl">
       <div className="mb-8">
         <h1 className="text-3xl text-[#0F1C2E] mb-2">Event Settings</h1>
         <p className="text-gray-600">Configure details & preferences (per event)</p>
       </div>
 
       <div className="space-y-6">
-        {/* Event info */}
         <Card className="border-none shadow-lg">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-[#0F1C2E]">
@@ -302,35 +659,61 @@ export default function SettingsPage() {
               />
             </div>
 
-            <div>
-              <Label htmlFor="eventDate">Event Date & Time</Label>
-              <Input
-                id="eventDate"
-                type="datetime-local"
-                value={eventDate}
-                onChange={(e) => setEventDate(e.target.value)}
-                disabled={loading}
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="location">Location</Label>
-              <div className="relative">
-                <MapPin className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="eventStartDate">Waktu Mulai Acara</Label>
                 <Input
-                  id="location"
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                  placeholder="Enter event location"
-                  className="pl-10"
+                  id="eventStartDate"
+                  type="datetime-local"
+                  value={eventStartDate}
+                  onChange={(e) => setEventStartDate(e.target.value)}
                   disabled={loading}
                 />
+              </div>
+
+              <div>
+                <Label htmlFor="eventEndDate">Waktu Selesai Acara</Label>
+                <Input
+                  id="eventEndDate"
+                  type="datetime-local"
+                  value={eventEndDate}
+                  onChange={(e) => setEventEndDate(e.target.value)}
+                  disabled={loading}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <Label>Lokasi Acara</Label>
+
+              <div className="grid md:grid-cols-2 gap-4">
+                <div>
+                  <Label>Nama Tempat</Label>
+                  <Input
+                    value={locationName}
+                    onChange={(e) => setLocationName(e.target.value)}
+                    placeholder="Contoh: Gedung Tio Ma"
+                    disabled={loading}
+                  />
+                </div>
+
+                <div>
+                  <Label>Alamat Lokasi</Label>
+                  <Input
+                    value={locationAddress}
+                    onChange={(e) => {
+                      setLocationAddress(e.target.value);
+                      setLocation(e.target.value);
+                    }}
+                    placeholder="Contoh: Jl. Raya ..."
+                    disabled={loading}
+                  />
+                </div>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Invitation Theme */}
         <Card className="border-none shadow-lg">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-[#0F1C2E]">
@@ -340,57 +723,467 @@ export default function SettingsPage() {
           </CardHeader>
 
           <CardContent className="space-y-6">
-            <div className="grid md:grid-cols-2 gap-4">
+            <div className="grid md:grid-cols-6 gap-4 items-end">
               <div>
-                <Label>Primary Color</Label>
-                <div className="flex items-center gap-3">
-                  <Input
-                    type="color"
-                    value={themePrimary}
-                    onChange={(e) => setThemePrimary(e.target.value)}
-                    disabled={loading}
-                    className="h-12 w-20 cursor-pointer p-1"
-                  />
-                  <div className="text-xs text-gray-600 font-mono">{themePrimary}</div>
-                </div>
-              </div>
-
-              <div>
-                <Label>Accent Color</Label>
-                <div className="flex items-center gap-3">
-                  <Input
-                    type="color"
-                    value={themeAccent}
-                    onChange={(e) => setThemeAccent(e.target.value)}
-                    disabled={loading}
-                    className="h-12 w-20 cursor-pointer p-1"
-                  />
-                  <div className="text-xs text-gray-600 font-mono">{themeAccent}</div>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <Label>Logo URL</Label>
+                <Label>Primary</Label>
                 <Input
-                  value={themeLogoUrl}
-                  onChange={(e) => setThemeLogoUrl(e.target.value)}
-                  placeholder="/Invitara.png atau https://..."
+                  type="color"
+                  value={themePrimary}
+                  onChange={(e) => setThemePrimary(e.target.value)}
                   disabled={loading}
+                  className="h-12"
                 />
               </div>
 
               <div>
-                <Label>Hero Image URL</Label>
+                <Label>Accent</Label>
                 <Input
-                  value={themeHeroUrl}
-                  onChange={(e) => setThemeHeroUrl(e.target.value)}
-                  placeholder="https://... (opsional)"
+                  type="color"
+                  value={themeAccent}
+                  onChange={(e) => setThemeAccent(e.target.value)}
                   disabled={loading}
+                  className="h-12"
+                />
+              </div>
+
+              <div>
+                <Label>Page Base</Label>
+                <Input
+                  type="color"
+                  value={themePageBaseColor}
+                  onChange={(e) => setThemePageBaseColor(e.target.value)}
+                  disabled={loading}
+                  className="h-12"
+                />
+              </div>
+
+              <div>
+                <Label>Primary Btn BG</Label>
+                <Input
+                  type="color"
+                  value={themeButtonPrimaryBg}
+                  onChange={(e) => setThemeButtonPrimaryBg(e.target.value)}
+                  disabled={loading}
+                  className="h-12"
+                />
+              </div>
+
+              <div>
+                <Label>Primary Btn Text</Label>
+                <Input
+                  type="color"
+                  value={themeButtonPrimaryText}
+                  onChange={(e) => setThemeButtonPrimaryText(e.target.value)}
+                  disabled={loading}
+                  className="h-12"
+                />
+              </div>
+
+              <div>
+                <Label>Secondary Btn BG</Label>
+                <Input
+                  type="color"
+                  value={themeButtonSecondaryBg}
+                  onChange={(e) => setThemeButtonSecondaryBg(e.target.value)}
+                  disabled={loading}
+                  className="h-12"
                 />
               </div>
             </div>
+
+            <div className="grid md:grid-cols-6 gap-4 items-end">
+              <div>
+                <Label>Secondary Btn Text</Label>
+                <Input
+                  type="color"
+                  value={themeButtonSecondaryText}
+                  onChange={(e) => setThemeButtonSecondaryText(e.target.value)}
+                  disabled={loading}
+                  className="h-12"
+                />
+              </div>
+
+              <div>
+                <Label>Card Color</Label>
+                <Input
+                  type="color"
+                  value={themeCardColorHex}
+                  onChange={(e) => setThemeCardColorHex(e.target.value)}
+                  disabled={loading}
+                  className="h-12"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <Label>Card Opacity ({themeCardOpacity}%)</Label>
+                <Input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={themeCardOpacity}
+                  onChange={(e) => setThemeCardOpacity(e.target.value)}
+                  disabled={loading}
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <Label>Preview Auto Text</Label>
+                <div
+                  className="h-12 rounded-xl border px-3 flex items-center text-sm"
+                  style={{
+                    background: themePageBaseColor,
+                    color: autoTextMode ? "#FFFFFF" : "#111827",
+                  }}
+                >
+                  {autoTextMode ? "Background gelap → text terang" : "Background terang → text gelap"}
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 p-4 space-y-4">
+              <div className="flex items-center justify-between gap-4">
+                <div className="font-semibold text-[#0F1C2E]">Gradient Editor</div>
+                <Button type="button" variant="outline" onClick={addGradientStop} disabled={loading}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Stop
+                </Button>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-4">
+                <div>
+                  <Label>Gradient Type</Label>
+                  <Select
+                    value={themeGradientType}
+                    onValueChange={(v) => setThemeGradientType(v as "linear" | "radial")}
+                    disabled={loading}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="linear">linear</SelectItem>
+                      <SelectItem value="radial">radial</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label>Angle</Label>
+                  <Input
+                    type="number"
+                    value={themeGradientAngle}
+                    onChange={(e) => setThemeGradientAngle(e.target.value)}
+                    placeholder="135"
+                    disabled={loading || themeGradientType === "radial"}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <Label>Gradient Bar</Label>
+
+                <div className="relative h-16 rounded-xl border border-gray-200 overflow-hidden">
+                  <div
+                    className="absolute inset-0"
+                    style={{ background: gradientPreview }}
+                  />
+                  {[...themeGradientStops]
+                    .sort((a, b) => a.position - b.position)
+                    .map((stop) => (
+                      <div
+                        key={stop.id}
+                        className="absolute -bottom-0.5 -translate-x-1/2"
+                        style={{ left: `${stop.position}%` }}
+                      >
+                        <div className="w-0.5 h-10 bg-white/80 mx-auto" />
+                        <div
+                          className="w-4 h-4 rounded-full border-2 border-white shadow"
+                          style={{ backgroundColor: stop.color }}
+                        />
+                      </div>
+                    ))}
+                </div>
+
+                <div className="space-y-3">
+                  {[...themeGradientStops]
+                    .sort((a, b) => a.position - b.position)
+                    .map((stop, idx) => (
+                      <div
+                        key={stop.id}
+                        className="grid md:grid-cols-12 gap-3 items-center rounded-lg border border-gray-200 p-3"
+                      >
+                        <div className="md:col-span-2 text-sm font-medium text-[#0F1C2E]">
+                          Stop {idx + 1}
+                        </div>
+
+                        <div className="md:col-span-2">
+                          <Input
+                            type="color"
+                            value={stop.color}
+                            onChange={(e) =>
+                              updateGradientStop(stop.id, { color: e.target.value })
+                            }
+                            disabled={loading}
+                            className="h-11"
+                          />
+                        </div>
+
+                        <div className="md:col-span-6">
+                          <Input
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={1}
+                            value={stop.position}
+                            onChange={(e) =>
+                              updateGradientStop(stop.id, {
+                                position: Number(e.target.value),
+                              })
+                            }
+                            disabled={loading}
+                          />
+                        </div>
+
+                        <div className="md:col-span-1">
+                          <Input
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={stop.position}
+                            onChange={(e) =>
+                              updateGradientStop(stop.id, {
+                                position: Number(e.target.value),
+                              })
+                            }
+                            disabled={loading}
+                          />
+                        </div>
+
+                        <div className="md:col-span-1 flex justify-end">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="border-red-200 text-red-600 hover:bg-red-50"
+                            onClick={() => removeGradientStop(stop.id)}
+                            disabled={loading || themeGradientStops.length <= 2}
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+
+              <div>
+                <Label>Preview Card</Label>
+                <div
+                  className="rounded-2xl border p-4 mt-2"
+                  style={{
+                    background: gradientPreview,
+                    borderColor: "#E5E7EB",
+                  }}
+                >
+                  <div
+                    className="rounded-2xl p-4 border"
+                    style={{
+                      backgroundColor: cardPreview,
+                      borderColor: "rgba(255,255,255,0.15)",
+                      color: autoTextMode ? "#FFFFFF" : "#111827",
+                    }}
+                  >
+                    Ini preview warna card.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-6">
+              <div className="space-y-3">
+                <Label>Logo Event</Label>
+                <div className="flex gap-2">
+                  <Input
+                    value={themeLogoUrl}
+                    onChange={(e) => setThemeLogoUrl(e.target.value)}
+                    placeholder="Upload or input URL"
+                    disabled={loading || uploadingLogo}
+                  />
+                  <label className="inline-flex">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => handleLogoUpload(e.target.files?.[0])}
+                      disabled={loading || uploadingLogo}
+                    />
+                    <Button type="button" variant="outline" asChild>
+                      <span>
+                        <Upload className="w-4 h-4 mr-2" />
+                        {uploadingLogo ? "Uploading..." : "Upload"}
+                      </span>
+                    </Button>
+                  </label>
+                </div>
+                {themeLogoUrl ? (
+                  <div className="rounded-lg border border-gray-200 p-3 inline-block">
+                    <img src={themeLogoUrl} alt="Logo preview" className="h-12 w-auto object-contain" />
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="space-y-3">
+                <Label>Background Image</Label>
+                <div className="flex gap-2">
+                  <Input
+                    value={themeHeroUrl}
+                    onChange={(e) => setThemeHeroUrl(e.target.value)}
+                    placeholder="Upload or input URL"
+                    disabled={loading || uploadingHero}
+                  />
+                  <label className="inline-flex">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => handleHeroUpload(e.target.files?.[0])}
+                      disabled={loading || uploadingHero}
+                    />
+                    <Button type="button" variant="outline" asChild>
+                      <span>
+                        <ImageIcon className="w-4 h-4 mr-2" />
+                        {uploadingHero ? "Uploading..." : "Upload"}
+                      </span>
+                    </Button>
+                  </label>
+                </div>
+                {themeHeroUrl ? (
+                  <div className="rounded-lg border border-gray-200 p-2">
+                    <img
+                      src={themeHeroUrl}
+                      alt="Hero preview"
+                      className="h-32 w-full object-cover rounded"
+                    />
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+              <div className="rounded-xl border border-gray-200 p-4 space-y-4">
+                <div className="font-semibold text-[#0F1C2E]">Background Theme</div>
+
+                <div className="grid md:grid-cols-3 gap-4">
+                  <div>
+                    <Label>Background Mode</Label>
+                    <Select
+                      value={themeHeroMode}
+                      onValueChange={(v) =>
+                        setThemeHeroMode(v as "image" | "gradient" | "image-overlay" | "image-gradient-blend")
+                      }
+                      disabled={loading}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="gradient">Gradient only</SelectItem>
+                        <SelectItem value="image">Image only</SelectItem>
+                        <SelectItem value="image-overlay">Image + overlay</SelectItem>
+                        <SelectItem value="image-gradient-blend">Image + gradient blend</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label>Background Height (px)</Label>
+                    <Input
+                      type="number"
+                      value={themeHeroHeight}
+                      onChange={(e) => setThemeHeroHeight(e.target.value)}
+                      disabled={loading}
+                    />
+                  </div>
+
+                  <div>
+                    <Label>Image Position</Label>
+                    <Select
+                      value={themeHeroImagePosition}
+                      onValueChange={setThemeHeroImagePosition}
+                      disabled={loading}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select image position" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="center center">Center</SelectItem>
+                        <SelectItem value="top center">Top Center</SelectItem>
+                        <SelectItem value="bottom center">Bottom Center</SelectItem>
+                        <SelectItem value="center left">Center Left</SelectItem>
+                        <SelectItem value="center right">Center Right</SelectItem>
+                        <SelectItem value="top left">Top Left</SelectItem>
+                        <SelectItem value="top right">Top Right</SelectItem>
+                        <SelectItem value="bottom left">Bottom Left</SelectItem>
+                        <SelectItem value="bottom right">Bottom Right</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="grid md:grid-cols-4 gap-4">
+                  <div>
+                    <Label>Overlay Color</Label>
+                    <Input
+                      type="color"
+                      value={themeHeroOverlayColor}
+                      onChange={(e) => setThemeHeroOverlayColor(e.target.value)}
+                      disabled={loading}
+                      className="h-12"
+                    />
+                  </div>
+
+                  <div>
+                    <Label>Overlay Opacity ({themeHeroOverlayOpacity}%)</Label>
+                    <Input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={themeHeroOverlayOpacity}
+                      onChange={(e) => setThemeHeroOverlayOpacity(e.target.value)}
+                      disabled={loading}
+                    />
+                  </div>
+
+                  <div>
+                    <Label>Image Size</Label>
+                    <Select
+                      value={themeHeroImageSize}
+                      onValueChange={setThemeHeroImageSize}
+                      disabled={loading}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="cover">cover</SelectItem>
+                        <SelectItem value="contain">contain</SelectItem>
+                        <SelectItem value="auto">auto</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex items-end">
+                    <div className="flex items-center justify-between rounded-xl border px-3 py-2 w-full">
+                      <span className="text-sm">Glow</span>
+                      <Switch
+                        checked={themeHeroGlowEnabled}
+                        onCheckedChange={setThemeHeroGlowEnabled}
+                        disabled={loading}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
 
             <div className="grid md:grid-cols-2 gap-4">
               <div>
@@ -424,16 +1217,71 @@ export default function SettingsPage() {
               />
             </div>
 
+            <div className="grid md:grid-cols-3 gap-4">
+              <div>
+                <Label>Host Name / Nama Penyelenggara</Label>
+                <Input
+                  value={themeHostName}
+                  onChange={(e) => setThemeHostName(e.target.value)}
+                  placeholder="Contoh: Panitia Wisuda SMA Pesat"
+                  disabled={loading}
+                />
+              </div>
+
+              <div>
+                <Label>Salam</Label>
+                <Input
+                  value={themeSalam}
+                  onChange={(e) => setThemeSalam(e.target.value)}
+                  placeholder="Contoh: Assalamualaikum Wr. Wb."
+                  disabled={loading}
+                />
+              </div>
+
+              <div>
+                <Label>Sapaan Tamu</Label>
+                <Input
+                  value={themeGuestGreeting}
+                  onChange={(e) => setThemeGuestGreeting(e.target.value)}
+                  placeholder="Contoh: Orang Tua/Wali Murid"
+                  disabled={loading}
+                />
+              </div>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <Label>Dresscode Laki-laki</Label>
+                <Input
+                  value={themeDresscodeMale}
+                  onChange={(e) => setThemeDresscodeMale(e.target.value)}
+                  placeholder="Contoh: Kemeja batik / formal"
+                  disabled={loading}
+                />
+              </div>
+
+              <div>
+                <Label>Dresscode Perempuan</Label>
+                <Input
+                  value={themeDresscodeFemale}
+                  onChange={(e) => setThemeDresscodeFemale(e.target.value)}
+                  placeholder="Contoh: Busana sopan / formal"
+                  disabled={loading}
+                />
+              </div>
+            </div>
+
             <div>
-              <Label>Dresscode</Label>
-              <Input
-                value={themeDresscode}
-                onChange={(e) => setThemeDresscode(e.target.value)}
+              <Label>Closing Text / Kalimat Penutup</Label>
+              <Textarea
+                value={themeClosingText}
+                onChange={(e) => setThemeClosingText(e.target.value)}
                 disabled={loading}
+                rows={4}
+                placeholder="Kalimat penutup undangan..."
               />
             </div>
 
-            {/* Agenda Builder */}
             <div className="rounded-xl border border-gray-200 p-4">
               <div className="flex items-center justify-between gap-4">
                 <div>
@@ -467,16 +1315,26 @@ export default function SettingsPage() {
                     >
                       <div className="grid md:grid-cols-12 gap-3 items-start">
                         <div className="md:col-span-2">
-                          <Label className="text-xs">Time</Label>
+                          <Label className="text-xs">Mulai</Label>
                           <Input
-                            value={it.time}
-                            onChange={(e) => updateAgenda(idx, { time: e.target.value })}
-                            placeholder="07.00"
+                            type="time"
+                            value={it.start_time}
+                            onChange={(e) => updateAgenda(idx, { start_time: e.target.value })}
                             disabled={loading}
                           />
                         </div>
 
-                        <div className="md:col-span-6">
+                        <div className="md:col-span-2">
+                          <Label className="text-xs">Selesai</Label>
+                          <Input
+                            type="time"
+                            value={it.end_time}
+                            onChange={(e) => updateAgenda(idx, { end_time: e.target.value })}
+                            disabled={loading}
+                          />
+                        </div>
+
+                        <div className="md:col-span-4">
                           <Label className="text-xs">Title</Label>
                           <Input
                             value={it.title}
@@ -535,7 +1393,6 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* FAQ Builder */}
             <div className="rounded-xl border border-gray-200 p-4">
               <div className="flex items-center justify-between gap-4">
                 <div>
@@ -625,29 +1482,9 @@ export default function SettingsPage() {
                 )}
               </div>
             </div>
-
-            {/* Quick Preview */}
-            <div className="p-4 rounded-xl border border-gray-200 bg-[#F5F7FA]">
-              <div className="text-sm text-[#0F1C2E] font-medium mb-2">Preview</div>
-              <div className="flex items-center gap-3">
-                <Button
-                  type="button"
-                  style={{ backgroundColor: themeAccent, color: "#0B1220" }}
-                >
-                  RSVP / Ambil Ticket
-                </Button>
-                <div
-                  className="h-10 flex-1 rounded-xl"
-                  style={{
-                    background: `linear-gradient(135deg, ${themePrimary}, ${themeAccent}33)`,
-                  }}
-                />
-              </div>
-            </div>
           </CardContent>
         </Card>
 
-        {/* QR settings */}
         <Card className="border-none shadow-lg">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-[#0F1C2E]">
@@ -681,7 +1518,6 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        {/* Email settings */}
         <Card className="border-none shadow-lg">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-[#0F1C2E]">
@@ -708,55 +1544,6 @@ export default function SettingsPage() {
             </div>
           </CardContent>
         </Card>
-
-        {/* (Optional) Badge/Access settings — kalau mau diaktifin tinggal uncomment di bawah */}
-        {/* 
-        <Card className="border-none shadow-lg">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-[#0F1C2E]">
-              <Palette className="w-5 h-5 text-[#D6C6A5]" />
-              Badge & Access Settings
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between p-4 bg-[#F5F7FA] rounded-lg">
-              <div>
-                <Label htmlFor="allowReentry" className="cursor-pointer">
-                  Allow Re-entry
-                </Label>
-                <p className="text-sm text-gray-600 mt-1">
-                  Guests can check in multiple times
-                </p>
-              </div>
-              <Switch
-                id="allowReentry"
-                checked={allowReentry}
-                onCheckedChange={setAllowReentry}
-                disabled={loading}
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="vipBadge">VIP Badge Color</Label>
-              <div className="flex gap-3 items-center">
-                <Input
-                  id="vipBadge"
-                  type="color"
-                  value={vipBadgeColor}
-                  onChange={(e) => setVipBadgeColor(e.target.value)}
-                  className="w-20 h-12 cursor-pointer"
-                  disabled={loading}
-                />
-                <div className="flex-1">
-                  <p className="text-sm text-gray-600">
-                    Current color: <span className="font-mono">{vipBadgeColor}</span>
-                  </p>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        */}
 
         <div className="flex justify-end gap-4 pt-4">
           <Button variant="outline" className="border-gray-300" disabled={saving}>
