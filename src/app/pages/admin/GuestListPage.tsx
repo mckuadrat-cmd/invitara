@@ -15,9 +15,6 @@ import {
   Upload,
   Trash2,
   Plus,
-  Cross,
-  DeleteIcon,
-  Delete,
   X,
   Check,
 } from "lucide-react";
@@ -348,13 +345,15 @@ export default function GuestListPage() {
     });
 
     const rows = (parsed.data || []).map((r: any) => ({
+      identity_no: String(r.identity_no ?? "").trim() || null,
       full_name: String(r.full_name ?? "").trim(),
       email: String(r.email ?? "").trim() || null,
       phone: String(r.phone ?? "").trim() || null,
       organization: String(r.organization ?? "").trim() || null,
+      dept_class: String(r.dept_class ?? "").trim() || null,
       unique_code:
         String(r.unique_code ?? "").trim().toUpperCase() || makeCode(),
-      status: (String(r.status ?? "confirmed").trim() as any) || "confirmed",
+      status: (String(r.status ?? "registered").trim() as any) || "registered",
     }));
 
     const clean = rows.filter((r) => r.full_name);
