@@ -745,43 +745,43 @@ export default function GuestInvitationPage() {
     );
   }
 
+  const isHeroImageMode =
+    heroMode === "image" ||
+    heroMode === "image-overlay" ||
+    heroMode === "image-gradient-blend";
+
+  const contentBackground = isHeroImageMode ? pageGradient : primary;
+
+  const contentGradient = `linear-gradient(
+    180deg,
+    ${rgbaFromHex(primary, 0.96)} 0%,
+    ${rgbaFromHex(primary, 0.9)} 35%,
+    ${rgbaFromHex(accent, 0.14)} 100%
+  )`;
+
   return (
     <div
       className="min-h-screen"
       style={{
-        background: primary,
+        backgroundColor: primary,
         color: adaptiveText.primary,
       }}
     >
-      <section
-        className="relative overflow-hidden"
-        style={{ minHeight: `max(${heroHeight}px, 70vh)` }}
-      >
-        <div
-          className="absolute inset-0"
-          style={{
-            backgroundImage: heroBackground,
-            backgroundBlendMode:
-              heroMode === "image-gradient-blend"
-                ? "normal, multiply, overlay, normal"
-                : heroMode === "image-overlay"
-                ? "normal, multiply, normal"
-                : undefined,
-            backgroundPosition:
-              heroMode === "image" ||
-              heroMode === "image-overlay" ||
-              heroMode === "image-gradient-blend"
-                ? heroImagePosition
-                : "center",
-            backgroundSize:
-              heroMode === "image" ||
-              heroMode === "image-overlay" ||
-              heroMode === "image-gradient-blend"
-                ? heroImageSize
-                : "cover",
-            backgroundRepeat: "no-repeat",
-          }}
-        />
+    <section
+      className="relative overflow-hidden"
+      style={{ minHeight: `max(${heroHeight}px, 70vh)` }}
+    >
+      <div
+        className="absolute inset-0"
+        style={{
+          backgroundImage: heroBackground,
+          backgroundPosition:
+            isHeroImageMode ? heroImagePosition : "center",
+          backgroundSize:
+            isHeroImageMode ? heroImageSize : "cover",
+          backgroundRepeat: "no-repeat",
+        }}
+      />
 
         <div className="relative max-w-6xl mx-auto px-6 pt-12 pb-16">
           <div className="mt-16 grid lg:grid-cols-[1.2fr_0.8fr] gap-8 items-start">
@@ -1078,6 +1078,13 @@ export default function GuestInvitationPage() {
         </div>
       </section>
 
+    <div
+      className="min-h-screen"
+      style={{
+        background: contentBackground,
+        color: adaptiveText.primary,
+      }}
+    >
       <section className="mt-4 max-w-6xl mx-auto px-6 pb-4">
         <div className="grid md:grid-cols-4 gap-4">
           <div
@@ -1166,7 +1173,7 @@ export default function GuestInvitationPage() {
           </div>
         </div>
       </section>
-
+    
       {agenda.length > 0 ? (
         <section className="max-w-6xl mx-auto px-6 pt-12">
           <div className="flex items-center justify-between gap-4">
@@ -1286,6 +1293,7 @@ export default function GuestInvitationPage() {
           </div>
         </div>
       ) : null}
+     </div> 
     </div>
   );
 }
