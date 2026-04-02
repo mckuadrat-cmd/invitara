@@ -6,8 +6,6 @@ import { Card, CardContent } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 
-type Role = "owner" | "admin" | "scanner";
-
 async function resolveEmail(identifier: string) {
   const input = identifier.trim();
   if (!input) return "";
@@ -121,6 +119,10 @@ export default function LoginPage() {
             >
               {loading ? "Signing in..." : "Login"}
             </Button>
+
+            <p className="text-xs text-center text-gray-500 mt-3">
+              Gunakan email atau username yang terdaftar
+            </p>
           </form>
         </CardContent>
       </Card>

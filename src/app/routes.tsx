@@ -16,6 +16,10 @@ import EventsPage from "./pages/admin/EventsPage";
 import ScreenPage from "./pages/admin/ScreenPage";
 import StaffManagementPage from "./pages/admin/StaffManagementPage";
 
+import CompleteInvitePage from "./pages/CompleteInvitePage";
+import MyEventsPage from "./pages/MyEventsPage";
+import PostLoginRedirectPage from "./pages/PostLoginRedirectPage";
+
 import LoginPage from "./pages/LoginPage";
 import ForbiddenPage from "./pages/ForbiddenPage";
 import NotFoundPage from "./pages/NotFoundPage";
@@ -25,8 +29,6 @@ import ScannerStandalonePage from "./pages/ScannerStandalonePage";
 import RequireAuth from "./auth/RequireAuth";
 import RequireRole from "./auth/RequireRole";
 import RequireEventAccess from "./auth/RequireEventAccess";
-
-import PostLoginRedirectPage from "./pages/PostLoginRedirectPage";
 
 export const router = createBrowserRouter([
   // Public
@@ -38,8 +40,9 @@ export const router = createBrowserRouter([
   // Auth
   { path: "/login", element: <LoginPage /> },
   { path: "/forbidden", element: <ForbiddenPage /> },
+  { path: "/auth/complete-invite", element: <CompleteInvitePage /> },
 
-  // After login redirect gateway
+  // Login redirect gateway
   {
     path: "/app",
     element: (
@@ -49,12 +52,24 @@ export const router = createBrowserRouter([
     ),
   },
 
-  // Screen (owner + per-event admin)
+  // Multi-event staff selector
+  {
+    path: "/my-events",
+    element: (
+      <RequireAuth>
+        <RequireRole allow={["staff", "owner"]}>
+          <MyEventsPage />
+        </RequireRole>
+      </RequireAuth>
+    ),
+  },
+
+  // Screen: owner atau admin event
   {
     path: "/screen/:eventId",
     element: (
       <RequireAuth>
-        <RequireRole allow={["owner", "admin"]}>
+        <RequireRole allow={["owner", "staff"]}>
           <RequireEventAccess allowStaff={["admin"]}>
             <ScreenPage />
           </RequireEventAccess>
@@ -63,12 +78,12 @@ export const router = createBrowserRouter([
     ),
   },
 
-  // Scanner fullscreen tanpa sidebar (owner + per-event admin + per-event scanner)
+  // Scanner fullscreen: owner, admin event, atau scanner event
   {
     path: "/scanner/:eventId",
     element: (
       <RequireAuth>
-        <RequireRole allow={["owner", "admin", "scanner"]}>
+        <RequireRole allow={["owner", "staff"]}>
           <RequireEventAccess allowStaff={["admin", "scanner"]}>
             <ScannerStandalonePage />
           </RequireEventAccess>
@@ -77,25 +92,24 @@ export const router = createBrowserRouter([
     ),
   },
 
-  // Admin area (sidebar layout) - owner + admin (scanner gak boleh masuk)
+  // Admin area
   {
     path: "/admin",
     element: (
       <RequireAuth>
-        <RequireRole allow={["owner", "admin"]}>
+        <RequireRole allow={["owner", "staff"]}>
           <AdminLayout />
         </RequireRole>
       </RequireAuth>
     ),
     children: [
-      { index: true, element: <Navigate to="/admin/events" replace /> },
+      { index: true, element: <Navigate to="/app" replace /> },
 
-      // LIST EVENTS:
-      // - owner: lihat semua + create event
-      // - admin: tetap boleh lihat "events yg dia terdaftar" (karena RLS), tapi di UI kita sembunyiin menu & tombol create
+      // Owner: list semua events
+      // Staff: tetap bisa buka page ini kalau RLS mengizinkan, tapi flow utama staff tetap /my-events
       { path: "events", element: <EventsPage /> },
 
-      // Per-event pages (owner bypass staff check, admin harus terdaftar sebagai admin)
+      // Event admin pages
       {
         path: "event/:eventId/dashboard",
         element: (
@@ -137,7 +151,7 @@ export const router = createBrowserRouter([
         ),
       },
 
-      // SETTINGS khusus owner
+      // Event settings: owner only
       {
         path: "event/:eventId/settings",
         element: (

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
-type GlobalRole = "owner" | "admin" | "scanner";
+type GlobalRole = "owner" | "staff";
 type StaffRole = "admin" | "scanner";
 
 export default function RequireEventAccess({
@@ -24,39 +24,42 @@ export default function RequireEventAccess({
       try {
         const { data: sess } = await supabase.auth.getSession();
         const user = sess.session?.user;
+
         if (!user) {
           nav("/login", { replace: true, state: { from: loc.pathname } });
           return;
         }
 
-        // ambil role global
         const { data: prof, error: profErr } = await supabase
           .from("profiles")
-          .select("role")
+          .select("role, role_global")
           .eq("user_id", user.id)
           .maybeSingle();
 
         if (profErr) throw profErr;
 
-        const role = (prof?.role ?? null) as GlobalRole | null;
-            if (!role) {
-            nav("/forbidden", { replace: true });
-            return;
-            }
+        const globalRole: GlobalRole | null =
+          prof?.role_global === "owner" || prof?.role === "owner"
+            ? "owner"
+            : prof
+            ? "staff"
+            : null;
 
-        // owner: always ok (global)
-        if (role === "owner") {
+        if (!globalRole) {
+          nav("/forbidden", { replace: true });
+          return;
+        }
+
+        if (globalRole === "owner") {
           setOk(true);
           return;
         }
 
-        // kalau halaman butuh eventId tapi eventId kosong => forbidden
         if (!eventId) {
           nav("/forbidden", { replace: true });
           return;
         }
 
-        // cek membership event_staff
         const { data: staff, error: staffErr } = await supabase
           .from("event_staff")
           .select("role")

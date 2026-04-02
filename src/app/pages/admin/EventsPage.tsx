@@ -19,7 +19,7 @@ type EventRow = {
   theme?: any;
 };
 
-type GlobalRole = "owner" | "admin" | "scanner";
+type GlobalRole = "owner" | "staff";
 
 function slugify(s: string) {
   return s
@@ -95,7 +95,7 @@ export default function EventsPage() {
     setEventCode(code || "");
   }, [autoSlugPreview]);
 
-  const [role, setRole] = useState<GlobalRole>("admin");
+  const [role, setRole] = useState<GlobalRole>("staff");
 
   useEffect(() => {
     (async () => {
@@ -105,11 +105,15 @@ export default function EventsPage() {
 
       const { data: prof } = await supabase
         .from("profiles")
-        .select("role")
+        .select("role, role_global")
         .eq("user_id", uid)
         .maybeSingle();
 
-      setRole((prof?.role ?? "scanner") as GlobalRole);
+      setRole(
+        prof?.role_global === "owner" || prof?.role === "owner"
+          ? "owner"
+          : "staff"
+      );
     })();
   }, []);
 
@@ -117,19 +121,45 @@ export default function EventsPage() {
     setLoading(true);
     setErr(null);
 
-    const { data, error } = await supabase
-      .from("events")
-      .select("*")
-      .order("created_at", { ascending: false });
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const uid = sess.session?.user?.id;
 
-    if (error) {
-      setErr(error.message);
+      if (!uid) throw new Error("Not logged in");
+
+      // owner → semua event
+      if (role === "owner") {
+        const { data, error } = await supabase
+          .from("events")
+          .select("*")
+          .order("created_at", { ascending: false });
+
+        if (error) throw error;
+
+        setEvents((data ?? []) as EventRow[]);
+        return;
+      }
+
+      // staff → hanya event yg dia punya akses
+      const { data, error } = await supabase
+        .from("event_staff")
+        .select(`
+          event:events (*)
+        `)
+        .eq("user_id", uid);
+
+      if (error) throw error;
+
+      const mapped =
+        (data ?? []).map((row: any) => row.event).filter(Boolean) ?? [];
+
+      setEvents(mapped);
+    } catch (e: any) {
+      setErr(e.message);
       setEvents([]);
-    } else {
-      setEvents((data ?? []) as EventRow[]);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   }
 
   useEffect(() => {
@@ -145,6 +175,7 @@ export default function EventsPage() {
       const uid = sess.session?.user?.id;
 
       if (!uid) throw new Error("Not logged in.");
+      if (role !== "owner") throw new Error("Hanya owner yang boleh membuat event.");
 
       const safeName = name.trim();
       const safeHostName = hostName.trim();
@@ -215,6 +246,8 @@ export default function EventsPage() {
     setErr(null);
 
     try {
+      if (role !== "owner") throw new Error("Hanya owner yang boleh mengubah status event.");
+
       const { data, error } = await supabase
         .from("events")
         .update({ status: nextStatus })
@@ -237,7 +270,11 @@ export default function EventsPage() {
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Events</h1>
-          <p className="text-sm text-muted-foreground">Create and manage events.</p>
+          <p className="text-sm text-muted-foreground">
+            {role === "owner"
+              ? "Create and manage events."
+              : "Daftar event yang bisa kamu akses."}
+          </p>
         </div>
 
         <Button variant="outline" onClick={refresh} disabled={loading}>
@@ -350,7 +387,7 @@ export default function EventsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>All events</CardTitle>
+          <CardTitle>{role === "owner" ? "All events" : "My accessible events"}</CardTitle>
         </CardHeader>
 
         <CardContent>
@@ -380,7 +417,7 @@ export default function EventsPage() {
                       </div>
                     </div>
 
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 flex-wrap">
                       {role === "owner" &&
                         (ev.status === "published" ? (
                           <Button

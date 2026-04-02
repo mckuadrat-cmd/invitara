@@ -15,7 +15,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "../../components/ui/button";
 import { supabase } from "../../lib/supabaseClient";
 
-type GlobalRole = "owner" | "admin" | "scanner";
+type GlobalRole = "owner" | "staff";
 
 export default function AdminLayout() {
   const location = useLocation();
@@ -23,7 +23,7 @@ export default function AdminLayout() {
   const nav = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  const [role, setRole] = useState<GlobalRole>("admin");
+  const [role, setRole] = useState<GlobalRole>("staff");
 
   useEffect(() => {
     (async () => {
@@ -33,12 +33,14 @@ export default function AdminLayout() {
 
       const { data: prof } = await supabase
         .from("profiles")
-        .select("role")
+        .select("role, role_global")
         .eq("user_id", uid)
         .maybeSingle();
 
-      if (!prof?.role) return;
-        setRole(prof.role as GlobalRole);
+      const nextRole: GlobalRole =
+        prof?.role_global === "owner" || prof?.role === "owner" ? "owner" : "staff";
+
+      setRole(nextRole);
     })();
   }, []);
 
@@ -49,9 +51,10 @@ export default function AdminLayout() {
   const navigation = useMemo(() => {
     const items: { name: string; href: string; icon: any }[] = [];
 
-    // OWNER: bisa lihat list semua events
     if (role === "owner") {
       items.push({ name: "Events", href: "/admin/events", icon: CalendarDays });
+    } else {
+      items.push({ name: "My Events", href: "/my-events", icon: CalendarDays });
     }
 
     if (baseEventPath && eventId) {
@@ -59,16 +62,11 @@ export default function AdminLayout() {
         { name: "Dashboard", href: `${baseEventPath}/dashboard`, icon: LayoutDashboard },
         { name: "Guest List", href: `${baseEventPath}/guests`, icon: Users },
         { name: "Scanner (Admin)", href: `${baseEventPath}/scanner`, icon: ScanLine },
-
-        // big screen
         { name: "Screen", href: `/screen/${eventId}`, icon: MonitorPlay },
-
         { name: "Analytics", href: `${baseEventPath}/analytics`, icon: BarChart3 },
-
-        { name: "Staff", href: `${baseEventPath}/staff`, icon: Users } // atau icon lain 
+        { name: "Staff", href: `${baseEventPath}/staff`, icon: Users }
       );
 
-      // OWNER: settings event
       if (role === "owner") {
         items.push({ name: "Settings", href: `${baseEventPath}/settings`, icon: Settings });
       }
@@ -139,8 +137,12 @@ export default function AdminLayout() {
 
         <div className="absolute bottom-0 left-0 right-0 p-6 border-t border-white/10 space-y-3">
           <div className="text-xs text-gray-400">
-            <p className="truncate">Role: {role}</p>
-            {eventId ? <p className="truncate">Selected Event: {eventId}</p> : <p>Select an event to manage</p>}
+            <p className="truncate">Global Role: {role}</p>
+            {eventId ? (
+              <p className="truncate">Selected Event: {eventId}</p>
+            ) : (
+              <p>{role === "owner" ? "Pilih event untuk dikelola" : "Pilih event di My Events"}</p>
+            )}
           </div>
 
           <Button
@@ -155,7 +157,10 @@ export default function AdminLayout() {
       </aside>
 
       {mobileMenuOpen && (
-        <div className="fixed inset-0 bg-black/50 z-30 lg:hidden" onClick={() => setMobileMenuOpen(false)} />
+        <div
+          className="fixed inset-0 bg-black/50 z-30 lg:hidden"
+          onClick={() => setMobileMenuOpen(false)}
+        />
       )}
 
       <main className="lg:ml-64 min-h-screen">

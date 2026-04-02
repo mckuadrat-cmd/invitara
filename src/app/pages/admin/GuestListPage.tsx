@@ -799,7 +799,7 @@ export default function GuestListPage() {
             <Button
               onClick={exportToCSV}
               className="bg-[#0F1C2E] hover:bg-[#0F1C2E]/90 text-white"
-              disabled={loading}
+              disabled={loading || guests.length === 0}
             >
               <Download className="w-4 h-4 mr-2" />
               Export CSV
@@ -856,7 +856,7 @@ export default function GuestListPage() {
                 setConfirmOpen(true);
               }}
               className="bg-[#0F1C2E] text-white hover:bg-[#0F1C2E]/90"
-              disabled={loading || confirmingAll}
+              disabled={loading || confirmingAll || guests.filter((g) => g.status === "registered").length === 0}
             >
               <Check className="w-4 h-4 mr-2" />
               {confirmingAll ? "Confirming..." : "Confirm All"}
@@ -867,7 +867,7 @@ export default function GuestListPage() {
             <Button
               onClick={downloadAllPdf}
               className="bg-[#D6C6A5] text-[#0F1C2E] hover:opacity-90"
-              disabled={loading || downloadingAllPdf || !event}
+              disabled={loading || downloadingAllPdf || !event || guests.filter((g) => g.status === "confirmed" || g.status === "checked_in").length === 0}
             >
               <Download className="w-4 h-4 mr-2" />
               {downloadingAllPdf ? "Preparing ZIP..." : "Download PDF All"}
@@ -879,7 +879,7 @@ export default function GuestListPage() {
               onClick={onDeleteAll}
               variant="outline"
               className="border-red-200 text-red-700 hover:bg-red-50"
-              disabled={loading || deletingAll}
+              disabled={loading || deletingAll || guests.length === 0}
             >
               <Trash2 className="w-4 h-4 mr-2" />
               {deletingAll ? "Deleting..." : "Delete All"}

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
-type Role = "admin" | "scanner" | "owner";
+type Role = "owner" | "staff" | "admin" | "scanner";
 
 export default function RequireRole({
   allow,
@@ -14,46 +14,64 @@ export default function RequireRole({
   const loc = useLocation();
   const [loading, setLoading] = useState(true);
   const [hasSession, setHasSession] = useState(false);
-  const [role, setRole] = useState<Role | null>(null);
+  const [globalRole, setGlobalRole] = useState<"owner" | "staff" | null>(null);
 
   useEffect(() => {
     (async () => {
-      const { data: sess } = await supabase.auth.getSession();
-      const session = sess.session;
+      try {
+        const { data: sess } = await supabase.auth.getSession();
+        const session = sess.session;
 
-      if (!session?.user?.id) {
-        setHasSession(false);
-        setRole(null);
+        if (!session?.user?.id) {
+          setHasSession(false);
+          setGlobalRole(null);
+          setLoading(false);
+          return;
+        }
+
+        setHasSession(true);
+
+        const uid = session.user.id;
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("role, role_global")
+          .eq("user_id", uid)
+          .maybeSingle();
+
+        if (error) {
+          setGlobalRole(null);
+        } else {
+          const nextRole =
+            data?.role_global === "owner" || data?.role === "owner"
+              ? "owner"
+              : "staff";
+
+          setGlobalRole(nextRole);
+        }
+      } finally {
         setLoading(false);
-        return;
       }
-
-      setHasSession(true);
-
-      const uid = session.user.id;
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("user_id", uid)
-        .maybeSingle();
-
-      if (error) {
-        setRole(null);
-      } else {
-        setRole((data?.role as Role) ?? null);
-      }
-
-      setLoading(false);
     })();
   }, []);
 
   if (loading) return null;
 
-  // ✅ belum login -> ke login, BUKAN forbidden
-  if (!hasSession) return <Navigate to="/login" replace state={{ from: loc.pathname }} />;
+  if (!hasSession) {
+    return <Navigate to="/login" replace state={{ from: loc.pathname }} />;
+  }
 
-  // ✅ sudah login tapi role tidak diizinkan -> forbidden
-  if (!role || !allow.includes(role)) return <Navigate to="/forbidden" replace />;
+  if (!globalRole) {
+    return <Navigate to="/forbidden" replace />;
+  }
+
+  const normalizedAllow = allow.map((r) => {
+    if (r === "admin" || r === "scanner") return "staff";
+    return r;
+  });
+
+  if (!normalizedAllow.includes(globalRole)) {
+    return <Navigate to="/forbidden" replace />;
+  }
 
   return <>{children}</>;
 }
