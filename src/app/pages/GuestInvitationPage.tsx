@@ -20,6 +20,7 @@ import { supabase } from "../lib/supabaseClient";
 import { Badge } from "../components/ui/badge";
 import { ThemedButton } from "../components/ThemedButton";
 import { generateGuestTicketPdf } from "../lib/pdf/generateGuestTicketPdf";
+import { toast } from "sonner";
 
 type GuestRow = {
   id: string;
@@ -242,11 +243,11 @@ function buildGradientCss(
   const stops: GradientStop[] =
     rawStops.length >= 2
       ? rawStops
-          .map((s: any) => ({
-            color: String(s?.color ?? fallbackPrimary),
-            position: Number(s?.position ?? 0),
-          }))
-          .sort((a, b) => a.position - b.position)
+        .map((s: any) => ({
+          color: String(s?.color ?? fallbackPrimary),
+          position: Number(s?.position ?? 0),
+        }))
+        .sort((a: any, b: any) => a.position - b.position)
       : [
           { color: fallbackPrimary, position: 0 },
           { color: fallbackAccent, position: 100 },
@@ -813,18 +814,18 @@ export default function GuestInvitationPage() {
   async function copyCode() {
     try {
       await navigator.clipboard.writeText(guestCode);
-      alert("Kode undangan berhasil disalin.");
+      toast.success("Kode undangan berhasil disalin.");
     } catch {
-      alert("Gagal menyalin kode. Silakan copy manual.");
+      toast.error("Gagal menyalin kode. Silakan copy manual.");
     }
   }
 
   async function copyLink() {
     try {
       await navigator.clipboard.writeText(window.location.href);
-      alert("Link undangan berhasil disalin.");
+      toast.success("Link undangan berhasil disalin.");
     } catch {
-      alert("Gagal menyalin link.");
+      toast.error("Gagal menyalin link.");
     }
   }
 
