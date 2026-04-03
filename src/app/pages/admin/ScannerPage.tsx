@@ -26,6 +26,23 @@ type EventRow = {
   location: string | null;
 };
 
+function fmtDateTime(iso: string | null) {
+  if (!iso) return "Waktu menyusul";
+  try {
+    return new Date(iso).toLocaleString("id-ID", {
+      weekday: "long",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short",
+    });
+  } catch {
+    return "Waktu menyusul";
+  }
+}
+
 export default function ScannerPage() {
   const { eventId } = useParams();
   const location = useLocation();
@@ -285,7 +302,25 @@ export default function ScannerPage() {
             // not a URL
           }
 
-          // 2) fallback plain code
+          // 2) coba parse JSON payload (QR v2)
+          try {
+            const parsed = JSON.parse(decodedText);
+
+            if (parsed?.v === 2 && parsed?.code) {
+              if (parsed?.eventId && parsed.eventId !== eventId) {
+                playError();
+                setResult({ success: false, message: "QR for different event." });
+                return;
+              }
+
+              await handleScanCode(String(parsed.code));
+              return;
+            }
+          } catch {
+            // bukan JSON, lanjut fallback
+          }
+
+          // 3) fallback plain code
           await handleScanCode(decodedText);
         },
         () => {}
@@ -316,7 +351,7 @@ export default function ScannerPage() {
           {event?.name ? (
             <>
               Event: <span className="font-semibold text-[#0F1C2E]">{event.name}</span>{" "}
-              • Checked-in: <span className="font-semibold text-[#0F1C2E]">{checkedCount}</span>
+              • {fmtDateTime(event.event_date)} • Checked-in: <span className="font-semibold text-[#0F1C2E]">{checkedCount}</span>
             </>
           ) : (
             <>

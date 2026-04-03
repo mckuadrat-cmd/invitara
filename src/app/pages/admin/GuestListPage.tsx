@@ -125,18 +125,34 @@ function buildGuestPhotoUrl(eventCode: string, uniqueCode: string) {
   return `${SUPABASE_URL}/storage/v1/object/public/guest-photos/${eventCode}/${uniqueCode}.jpg`;
 }
 
-async function convertImageToJpg(file: File, quality = 0.92): Promise<File> {
+async function convertImageToJpg(file: File, quality = 0.82, maxSize = 1000): Promise<File> {
   const bitmap = await createImageBitmap(file);
+
+  let targetWidth = bitmap.width;
+  let targetHeight = bitmap.height;
+
+  if (bitmap.width > bitmap.height) {
+    if (bitmap.width > maxSize) {
+      targetWidth = maxSize;
+      targetHeight = Math.round((bitmap.height / bitmap.width) * maxSize);
+    }
+  } else {
+    if (bitmap.height > maxSize) {
+      targetHeight = maxSize;
+      targetWidth = Math.round((bitmap.width / bitmap.height) * maxSize);
+    }
+  }
+
   const canvas = document.createElement("canvas");
-  canvas.width = bitmap.width;
-  canvas.height = bitmap.height;
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
 
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas context tidak tersedia.");
 
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(bitmap, 0, 0);
+  ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
 
   const blob: Blob = await new Promise((resolve, reject) => {
     canvas.toBlob(
@@ -399,14 +415,14 @@ export default function GuestListPage() {
     }
   }
 
-  async function loadGuests() {
+  async function loadGuests(showLoading = true) {
     if (!eventId) {
       setGuests([]);
       setLoading(false);
       return;
     }
 
-    setLoading(true);
+    if (showLoading) setLoading(true);
     setErr(null);
 
     const { data, error } = await supabase
@@ -421,12 +437,36 @@ export default function GuestListPage() {
     } else {
       setGuests((data ?? []) as GuestRow[]);
     }
-    setLoading(false);
+
+    if (showLoading) setLoading(false);
   }
 
   useEffect(() => {
-    loadGuests();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadGuests(true);
+  }, [eventId]);
+
+  useEffect(() => {
+    if (!eventId) return;
+
+    const channel = supabase
+      .channel(`guest-list:${eventId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "guests",
+          filter: `event_id=eq.${eventId}`,
+        },
+        async () => {
+          await loadGuests(false);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [eventId]);
 
   async function addGuestManual() {
@@ -972,7 +1012,7 @@ export default function GuestListPage() {
 
         <div className="flex gap-1 flex-wrap">
           <Button
-            onClick={loadGuests}
+            onClick={() => loadGuests(true)}
             variant="outline"
             className="border-[#0F1C2E]/20"
             disabled={loading}

@@ -32,22 +32,26 @@ function initials(name: string) {
 function fmtTime(iso: string | null) {
   if (!iso) return "—";
   try {
-    return new Date(iso).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+    return new Date(iso).toLocaleTimeString("id-ID", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      timeZoneName: "short"
+    });
   } catch {
     return "—";
   }
 }
 
 function playDing() {
-  // No asset file needed (WebAudio)
   try {
-    const AudioCtx = (window.AudioContext || (window as any).webkitAudioContext);
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
     const ctx = new AudioCtx();
     const o = ctx.createOscillator();
     const g = ctx.createGain();
 
     o.type = "sine";
-    o.frequency.value = 880; // A5
+    o.frequency.value = 880;
     g.gain.value = 0.0001;
 
     o.connect(g);
@@ -73,6 +77,7 @@ export default function ScreenPage() {
 
   const [event, setEvent] = useState<EventRow | null>(null);
   const [checkedCount, setCheckedCount] = useState(0);
+  const [displayCount, setDisplayCount] = useState(0);
 
   const [latestGuest, setLatestGuest] = useState<GuestRow | null>(null);
   const [recent, setRecent] = useState<GuestRow[]>([]);
@@ -81,17 +86,31 @@ export default function ScreenPage() {
   const [isFullscreen, setIsFullscreen] = useState<boolean>(!!document.fullscreenElement);
   const [flash, setFlash] = useState(false);
 
+  const [activeGuestId, setActiveGuestId] = useState<string | null>(null);
+  const [rotateIndex, setRotateIndex] = useState(0);
+
+  const ROTATE_MS = 5000;
+
   const brokenPhotoIds = useRef<Set<string>>(new Set());
   const latestGuestIdRef = useRef<string | null>(null);
   const wakeLockRef = useRef<any>(null);
 
   const title = useMemo(() => event?.name ?? "Live Check-in", [event?.name]);
-  const [displayCount, setDisplayCount] = useState(0);
-  const [highlightIndex, setHighlightIndex] = useState(0);
-  const featuredGuest = recent[highlightIndex] ?? latestGuest;
+
+  const featuredGuest = useMemo(() => {
+    if (!recent.length) return latestGuest;
+
+    if (activeGuestId) {
+      const found = recent.find((g) => g.id === activeGuestId);
+      if (found) return found;
+    }
+
+    return recent[rotateIndex] ?? recent[0] ?? latestGuest;
+  }, [recent, activeGuestId, rotateIndex, latestGuest]);
 
   async function loadEvent() {
     if (!eventId) return;
+
     const { data, error } = await supabase
       .from("events")
       .select("id,name,location,event_date")
@@ -102,11 +121,13 @@ export default function ScreenPage() {
       setError(error.message);
       return;
     }
+
     setEvent((data ?? null) as EventRow | null);
   }
 
   async function loadCount() {
     if (!eventId) return;
+
     const { count } = await supabase
       .from("guests")
       .select("*", { count: "exact", head: true })
@@ -130,13 +151,15 @@ export default function ScreenPage() {
       .order("checkin_time", { ascending: false })
       .limit(12);
 
-    const res = !r1.error ? r1 : await supabase
-      .from("guests")
-      .select("id,event_id,full_name,email,organization,unique_code,status,checkin_time")
-      .eq("event_id", eventId)
-      .eq("status", "checked_in")
-      .order("checkin_time", { ascending: false })
-      .limit(12);
+    const res = !r1.error
+      ? r1
+      : await supabase
+          .from("guests")
+          .select("id,event_id,full_name,email,organization,unique_code,status,checkin_time")
+          .eq("event_id", eventId)
+          .eq("status", "checked_in")
+          .order("checkin_time", { ascending: false })
+          .limit(12);
 
     if (res.error) {
       setError(res.error.message);
@@ -147,23 +170,38 @@ export default function ScreenPage() {
     setRecent(list);
 
     const next = list[0] ?? null;
-
-    // trigger animasi + sound kalau guest berubah
     const prevId = latestGuestIdRef.current;
     const nextId = next?.id ?? null;
+
     if (nextId && nextId !== prevId) {
       setFlash(true);
       playDing();
       window.setTimeout(() => setFlash(false), 900);
+
+      setActiveGuestId(nextId);
+      setRotateIndex(0);
     }
 
     setLatestGuest(next);
     latestGuestIdRef.current = nextId;
   }
 
-  useEffect(() => {
-    setHighlightIndex(0);
-  }, [recent.length, latestGuest?.id]);
+  function canShowPhoto(g: GuestRow) {
+    if (!g.photo_url) return false;
+    return !brokenPhotoIds.current.has(g.id);
+  }
+
+  async function toggleFullscreen() {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch {
+      // ignore
+    }
+  }
 
   useEffect(() => {
     setError(null);
@@ -200,9 +238,8 @@ export default function ScreenPage() {
     }, duration / steps);
 
     return () => window.clearInterval(tick);
-  }, [checkedCount]);
+  }, [checkedCount, displayCount]);
 
-  // realtime UPDATE + INSERT
   useEffect(() => {
     if (!eventId) return;
 
@@ -210,7 +247,12 @@ export default function ScreenPage() {
       .channel(`screen-${eventId}`)
       .on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "guests", filter: `event_id=eq.${eventId}` },
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "guests",
+          filter: `event_id=eq.${eventId}`,
+        },
         async (payload) => {
           const n: any = payload.new;
           const o: any = payload.old;
@@ -227,7 +269,12 @@ export default function ScreenPage() {
       )
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "guests", filter: `event_id=eq.${eventId}` },
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "guests",
+          filter: `event_id=eq.${eventId}`,
+        },
         async (payload) => {
           const n: any = payload.new;
           if (n?.status === "checked_in") {
@@ -244,13 +291,14 @@ export default function ScreenPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
 
-  // polling fallback
   useEffect(() => {
     if (!eventId) return;
+
     const t = window.setInterval(() => {
       loadCount();
       loadRecent();
     }, 15000);
+
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
@@ -259,20 +307,40 @@ export default function ScreenPage() {
     if (recent.length <= 1) return;
 
     const t = window.setInterval(() => {
-      setHighlightIndex((prev) => (prev + 1) % recent.length);
-    }, 3000);
+      setRotateIndex((prev) => {
+        const nextIndex = (prev + 1) % recent.length;
+        const nextGuest = recent[nextIndex];
+
+        if (nextGuest) {
+          setActiveGuestId(nextGuest.id);
+        }
+
+        return nextIndex;
+      });
+    }, ROTATE_MS);
 
     return () => window.clearInterval(t);
   }, [recent]);
 
-  // fullscreen state
+  useEffect(() => {
+    if (!recent.length) {
+      setRotateIndex(0);
+      setActiveGuestId(null);
+      return;
+    }
+
+    if (rotateIndex >= recent.length) {
+      setRotateIndex(0);
+      setActiveGuestId(recent[0].id);
+    }
+  }, [recent, rotateIndex]);
+
   useEffect(() => {
     const handler = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener("fullscreenchange", handler);
     return () => document.removeEventListener("fullscreenchange", handler);
   }, []);
 
-  // hotkey: F toggle fullscreen
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === "f") {
@@ -280,25 +348,14 @@ export default function ScreenPage() {
         toggleFullscreen();
       }
       if (e.key === "Escape" && document.fullscreenElement) {
-        // biar state rapi
         setIsFullscreen(true);
       }
     };
+
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function toggleFullscreen() {
-    try {
-      if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
-      else await document.exitFullscreen();
-    } catch {
-      // ignore
-    }
-  }
-
-  // Wake Lock biar layar gak tidur
   useEffect(() => {
     let cancelled = false;
 
@@ -309,43 +366,45 @@ export default function ScreenPage() {
 
         const lock = await anyNav.wakeLock.request("screen");
         if (cancelled) {
-          try { await lock.release(); } catch {}
+          try {
+            await lock.release();
+          } catch {}
           return;
         }
+
         wakeLockRef.current = lock;
         lock.addEventListener("release", () => (wakeLockRef.current = null));
       } catch {}
     }
 
     requestWakeLock();
-    const onVis = () => document.visibilityState === "visible" && requestWakeLock();
+
+    const onVis = () => {
+      if (document.visibilityState === "visible") requestWakeLock();
+    };
+
     document.addEventListener("visibilitychange", onVis);
 
     return () => {
       cancelled = true;
       document.removeEventListener("visibilitychange", onVis);
-      try { wakeLockRef.current?.release?.(); } catch {}
+      try {
+        wakeLockRef.current?.release?.();
+      } catch {}
       wakeLockRef.current = null;
     };
   }, []);
 
-  function canShowPhoto(g: GuestRow) {
-    if (!g.photo_url) return false;
-    return !brokenPhotoIds.current.has(g.id);
-  }
-
   return (
-      <div
-        className="h-screen overflow-hidden text-white"
-        style={{
-          background:
-            "radial-gradient(circle at 20% 20%, rgba(31,41,55,0.85) 0%, rgba(31,41,55,0.35) 18%, rgba(11,18,32,0) 42%), linear-gradient(180deg, #0F172A 0%, #0B1220 45%, #08101C 100%)",
-        }}
-      >
-      {/* Header */}
+    <div
+      className="h-screen overflow-hidden text-white"
+      style={{
+        background:
+          "radial-gradient(circle at 20% 20%, rgba(31,41,55,0.85) 0%, rgba(31,41,55,0.35) 18%, rgba(11,18,32,0) 42%), linear-gradient(180deg, #0F172A 0%, #0B1220 45%, #08101C 100%)",
+      }}
+    >
       <div className="px-10 pt-15 pb-6 flex items-start justify-between gap-6">
         <div className="flex items-start gap-4">
-          {/* Back icon */}
           <button
             onClick={() => nav("/app", { replace: true })}
             className="mt-1 w-20 h-20 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 flex items-center justify-center transition"
@@ -357,7 +416,7 @@ export default function ScreenPage() {
 
           <div>
             <div className="text-sm text-white/70">INVITARA • LIVE</div>
-            <div className="text-3xl font-semibold mt-1 line-clamp-2">{title}</div>
+            <div className="text-3xl font-semibold mt-1 pr-45 line-clamp-2">{title}</div>
             <div className="text-white/70 mt-2">
               {event?.location ?? "—"}
               {event?.event_date ? (
@@ -365,9 +424,13 @@ export default function ScreenPage() {
                   {" "}
                   •{" "}
                   {new Date(event.event_date).toLocaleString("id-ID", {
+                    weekday: "long",
                     day: "2-digit",
                     month: "short",
                     year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    timeZoneName: "short",                    
                   })}
                 </span>
               ) : null}
@@ -376,7 +439,7 @@ export default function ScreenPage() {
           </div>
         </div>
 
-        <div className="text-right flex flex-col items-end gap-4">
+        <div className="text-right flex flex-col items-end gap-8">
           <div>
             <div className="text-sm text-white/70">Total:</div>
             <div
@@ -388,7 +451,6 @@ export default function ScreenPage() {
             </div>
           </div>
 
-          {/* Fullscreen icon */}
           <button
             onClick={toggleFullscreen}
             className="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 flex items-center justify-center transition"
@@ -400,20 +462,22 @@ export default function ScreenPage() {
         </div>
       </div>
 
-      {/* Body (fix height, no page scroll) */}
       <div className="px-10 pb-10 h-[calc(100vh-120px)] grid grid-cols-12 gap-8">
-        {/* Featured */}
         <div className="col-span-8 h-150">
           <div
             className={[
               "h-full rounded-3xl bg-white/5 border p-10 flex items-center transition",
-              flash ? "border-emerald-300/60 shadow-[0_0_40px_rgba(16,185,129,0.25)]" : "border-white/10",
+              flash
+                ? "border-emerald-300/60 shadow-[0_0_40px_rgba(16,185,129,0.25)]"
+                : "border-white/10",
             ].join(" ")}
           >
             {featuredGuest ? (
-              <div className={`w-full flex items-center gap-10 transition-all duration-500
-                  ${flash ? "scale-[1.015]" : "scale-100"}
-                `}>
+              <div
+                className={`w-full flex items-center gap-10 transition-all duration-500 ${
+                  flash ? "scale-[1.015]" : "scale-100"
+                }`}
+              >
                 <div className="shrink-0">
                   {canShowPhoto(featuredGuest) ? (
                     <img
@@ -448,7 +512,6 @@ export default function ScreenPage() {
                     </div>
                   </div>
 
-                  {/* small “live pulse” */}
                   <div className="mt-6 flex items-center gap-2 text-white/60 text-sm">
                     <span className="relative flex h-2.5 w-2.5">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-40"></span>
@@ -470,7 +533,6 @@ export default function ScreenPage() {
           </div>
         </div>
 
-        {/* Recent (only this scrolls) */}
         <div className="col-span-4 h-150">
           <div className="h-full rounded-3xl bg-white/5 border border-white/10 p-6 flex flex-col">
             <div>
@@ -482,16 +544,16 @@ export default function ScreenPage() {
               {recent.length === 0 ? (
                 <div className="text-white/60 text-sm">Belum ada check-in.</div>
               ) : (
-                  recent.map((g, i) => (
-                    <div
-                      key={g.id}
-                      className={[
-                        "rounded-2xl p-4 flex items-center gap-4 border transition-all duration-300",
-                        i === 0
-                          ? "bg-emerald-500/10 border-emerald-400/30 shadow-[0_0_20px_rgba(16,185,129,0.12)]"
-                          : "bg-white/5 border-white/10",
-                      ].join(" ")}
-                    >
+                recent.map((g, i) => (
+                  <div
+                    key={g.id}
+                    className={[
+                      "rounded-2xl p-4 flex items-center gap-4 border transition-all duration-300",
+                      i === 0
+                        ? "bg-emerald-500/10 border-emerald-400/30 shadow-[0_0_20px_rgba(16,185,129,0.12)]"
+                        : "bg-white/5 border-white/10",
+                    ].join(" ")}
+                  >
                     <div className="shrink-0">
                       {canShowPhoto(g) ? (
                         <img
@@ -506,10 +568,14 @@ export default function ScreenPage() {
                         </div>
                       )}
                     </div>
+
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold truncate">{g.full_name}</div>
-                      <div className="text-xs text-white/60 truncate">{g.organization ?? "—"}</div>
+                      <div className="text-xs text-white/60 truncate">
+                        {g.organization ?? "—"}
+                      </div>
                     </div>
+
                     <div className="text-xs text-white/70">{fmtTime(g.checkin_time)}</div>
                   </div>
                 ))

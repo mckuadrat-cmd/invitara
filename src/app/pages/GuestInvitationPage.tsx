@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
-import jsPDF from "jspdf";
 import QRCode from "qrcode";
 import {
   Calendar,
@@ -19,7 +18,6 @@ import {
 
 import { supabase } from "../lib/supabaseClient";
 import { Badge } from "../components/ui/badge";
-import { ImageWithFallback } from "../components/figma/ImageWithFallback";
 import { ThemedButton } from "../components/ThemedButton";
 import { generateGuestTicketPdf } from "../lib/pdf/generateGuestTicketPdf";
 
@@ -46,11 +44,6 @@ type EventRow = {
   status: string;
   theme?: any;
   event_code?: string | null;
-};
-
-type EventSettingsRow = {
-  event_id: string;
-  qr_format: "QR Code v1" | "QR Code v2" | "QR Code v3" | string;
 };
 
 type AgendaItem = {
@@ -203,38 +196,6 @@ function getCountdownParts(targetIso: string | null) {
   };
 }
 
-function safeText(value: string | null | undefined, fallback = "-") {
-  return String(value ?? "").trim() || fallback;
-}
-
-function formatPdfDateTime(iso: string | null) {
-  if (!iso) return "Waktu menyusul";
-  try {
-    return new Date(iso).toLocaleString("id-ID", {
-      weekday: "long",
-      day: "2-digit",
-      month: "long",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return "Waktu menyusul";
-  }
-}
-
-async function urlToDataUrl(url: string): Promise<string> {
-  const response = await fetch(url);
-  const blob = await response.blob();
-
-  return await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(String(reader.result));
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
-
 function hexToRgb(hex: string, fallback = { r: 15, g: 28, b: 46 }) {
   const clean = String(hex || "").replace("#", "").trim();
 
@@ -326,6 +287,10 @@ function getAdaptiveTextColors(bgHex: string) {
   };
 }
 
+function primaryFallback(hex: string) {
+  return hex || "#0F1C2E";
+}
+
 function buildHeroBackground({
   mode,
   imageUrl,
@@ -387,10 +352,6 @@ function buildHeroBackground({
   return [glowLayer, gradientCss].filter(Boolean).join(", ");
 }
 
-function primaryFallback(hex: string) {
-  return hex || "#0F1C2E";
-}
-
 function getFriendlyInvitationError(message?: string | null) {
   const msg = String(message || "").toLowerCase();
 
@@ -447,95 +408,136 @@ export default function GuestInvitationPage() {
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [countdown, setCountdown] = useState(() => getCountdownParts(null));
 
-  useEffect(() => {
-    (async () => {
-      try {
-        setLoading(true);
-        setErr(null);
+  const refreshTimerRef = useRef<number | null>(null);
+  const pollingRef = useRef<number | null>(null);
+  const isFetchingRef = useRef(false);
+  const lastFetchAtRef = useRef(0);
 
-        if (!guestCode) throw new Error("Kode undangan tidak ditemukan.");
+  async function loadInvitation(showLoading = true) {
+    if (!guestCode) {
+      setErr("Kode undangan tidak ditemukan.");
+      setGuest(null);
+      setEvent(null);
+      setQrDataUrl("");
+      setLoading(false);
+      return;
+    }
 
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
 
-        const headers: Record<string, string> = {};
-        if (session?.access_token) {
-          headers.Authorization = `Bearer ${session.access_token}`;
-        }
+    try {
+      if (showLoading) setLoading(true);
+      setErr(null);
 
-        const { data, error } = await supabase.functions.invoke("public-invitation", {
-          body: { code: guestCode },
-          headers,
-        });
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-        if (error) {
-          throw new Error(
-            data?.error ||
-              error.message ||
-              "Gagal memuat undangan."
-          );
-        }
-
-        if (!data?.guest || !data?.event) {
-          throw new Error("Undangan tidak ditemukan.");
-        }
-
-        const guestRow = data.guest as GuestRow;
-        const eventRow = data.event as EventRow;
-        const fmt = String(data.qrFormat ?? "QR Code v1");
-
-        setGuest(guestRow);
-        setEvent(eventRow);
-        setQrFormat(fmt);
-
-        const origin = window.location.origin;
-
-        let payloadText = `${origin}/admin/event/${guestRow.event_id}/scanner?code=${encodeURIComponent(
-          guestCode
-        )}`;
-
-        if (fmt === "QR Code v2") {
-          payloadText = JSON.stringify({
-            v: 2,
-            eventId: guestRow.event_id,
-            code: guestCode,
-          });
-        }
-
-        if (fmt === "QR Code v3") {
-          const { data: signData, error: signErr } = await supabase.functions.invoke(
-            "ticket_sign",
-            {
-              body: { eventId: guestRow.event_id, code: guestCode },
-              headers,
-            }
-          );
-
-          if (signErr) {
-            throw new Error(signData?.error || signErr.message || "Gagal membuat token QR.");
-          }
-
-          const token = signData?.token;
-          if (!token) throw new Error("Token QR tidak berhasil dibuat.");
-
-          payloadText = `${origin}/admin/event/${guestRow.event_id}/scanner?t=${encodeURIComponent(
-            token
-          )}`;
-        }
-
-        const qr = await QRCode.toDataURL(payloadText, {
-          margin: 2,
-          width: 640,
-        });
-
-        setQrDataUrl(qr);
-      } catch (e: any) {
-        setErr(getFriendlyInvitationError(e?.message ?? "Gagal memuat undangan."));
-      } finally {
-        setLoading(false);
+      const headers: Record<string, string> = {};
+      if (session?.access_token) {
+        headers.Authorization = `Bearer ${session.access_token}`;
       }
-    })();
+
+      const { data, error } = await supabase.functions.invoke("public-invitation", {
+        body: { code: guestCode },
+        headers,
+      });
+
+      if (error) {
+        throw new Error(data?.error || error.message || "Gagal memuat undangan.");
+      }
+
+      if (!data?.guest || !data?.event) {
+        throw new Error("Undangan tidak ditemukan.");
+      }
+
+      const guestRow = data.guest as GuestRow;
+      const eventRow = data.event as EventRow;
+      const fmt = String(data.qrFormat ?? "QR Code v1");
+
+      setGuest(guestRow);
+      setEvent(eventRow);
+      setQrFormat(fmt);
+
+      const origin = window.location.origin;
+
+      let payloadText = `${origin}/admin/event/${guestRow.event_id}/scanner?code=${encodeURIComponent(
+        guestCode
+      )}`;
+
+      if (fmt === "QR Code v2") {
+        payloadText = JSON.stringify({
+          v: 2,
+          eventId: guestRow.event_id,
+          code: guestCode,
+        });
+      }
+
+      if (fmt === "QR Code v3") {
+        const { data: signData, error: signErr } = await supabase.functions.invoke(
+          "ticket_sign",
+          {
+            body: { eventId: guestRow.event_id, code: guestCode },
+            headers,
+          }
+        );
+
+        if (signErr) {
+          throw new Error(signData?.error || signErr.message || "Gagal membuat token QR.");
+        }
+
+        const token = signData?.token;
+        if (!token) throw new Error("Token QR tidak berhasil dibuat.");
+
+        payloadText = `${origin}/admin/event/${guestRow.event_id}/scanner?t=${encodeURIComponent(
+          token
+        )}`;
+      }
+
+      const qr = await QRCode.toDataURL(payloadText, {
+        margin: 2,
+        width: 640,
+      });
+
+      setQrDataUrl(qr);
+      lastFetchAtRef.current = Date.now();
+    } catch (e: any) {
+      setErr(getFriendlyInvitationError(e?.message ?? "Gagal memuat undangan."));
+    } finally {
+      isFetchingRef.current = false;
+      if (showLoading) setLoading(false);
+    }
+  }
+
+  function scheduleRefresh(delay = 450) {
+    const now = Date.now();
+
+    if (now - lastFetchAtRef.current < 300) return;
+
+    if (refreshTimerRef.current) {
+      window.clearTimeout(refreshTimerRef.current);
+    }
+
+    refreshTimerRef.current = window.setTimeout(() => {
+      if (document.visibilityState === "visible" && !isFetchingRef.current) {
+        loadInvitation(false);
+      }
+    }, delay);
+  }
+
+  useEffect(() => {
+    loadInvitation(true);
+
+    return () => {
+      if (refreshTimerRef.current) {
+        window.clearTimeout(refreshTimerRef.current);
+      }
+      if (pollingRef.current) {
+        window.clearInterval(pollingRef.current);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [guestCode]);
 
   useEffect(() => {
@@ -547,6 +549,97 @@ export default function GuestInvitationPage() {
     const timer = window.setInterval(update, 1000);
     return () => window.clearInterval(timer);
   }, [event?.event_date]);
+
+  useEffect(() => {
+    if (!guest?.id || !guest?.event_id) return;
+
+    const guestChannel = supabase
+      .channel(`invitation-guest:${guest.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "guests",
+          filter: `id=eq.${guest.id}`,
+        },
+        () => {
+          scheduleRefresh(250);
+        }
+      )
+      .subscribe();
+
+    const eventChannel = supabase
+      .channel(`invitation-event:${guest.event_id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "events",
+          filter: `id=eq.${guest.event_id}`,
+        },
+        () => {
+          scheduleRefresh(250);
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "event_settings",
+          filter: `event_id=eq.${guest.event_id}`,
+        },
+        () => {
+          scheduleRefresh(250);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(guestChannel);
+      supabase.removeChannel(eventChannel);
+    };
+  }, [guest?.id, guest?.event_id]);
+
+  useEffect(() => {
+    if (!guestCode) return;
+
+    if (pollingRef.current) {
+      window.clearInterval(pollingRef.current);
+    }
+
+    pollingRef.current = window.setInterval(() => {
+      if (document.visibilityState === "visible" && !isFetchingRef.current) {
+        loadInvitation(false);
+      }
+    }, 5000);
+
+    const onFocus = () => {
+      scheduleRefresh(100);
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        scheduleRefresh(100);
+      }
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+
+      if (pollingRef.current) {
+        window.clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guestCode]);
 
   const theme = useMemo(() => event?.theme ?? {}, [event]);
   const brand = useMemo(() => theme.brand ?? theme ?? {}, [theme]);
@@ -567,30 +660,29 @@ export default function GuestInvitationPage() {
 
   const textConfig = event?.theme?.text;
 
-  const adaptiveText = textConfig?.mode === "manual"
-    ? {
-        primary: textConfig.primary,
-        secondary: textConfig.secondary,
-        muted: textConfig.muted,
-        soft: textConfig.muted,
-        border: "rgba(255,255,255,0.12)",
-        cardBorder: "rgba(255,255,255,0.10)",
-        cardSoft: "rgba(255,255,255,0.06)",
-      }
-    : getAdaptiveTextColors(pageBaseColor);
+  const adaptiveText =
+    textConfig?.mode === "manual"
+      ? {
+          primary: textConfig.primary,
+          secondary: textConfig.secondary,
+          muted: textConfig.muted,
+          soft: textConfig.muted,
+          border: "rgba(255,255,255,0.12)",
+          cardBorder: "rgba(255,255,255,0.10)",
+          cardSoft: "rgba(255,255,255,0.06)",
+        }
+      : getAdaptiveTextColors(pageBaseColor);
 
   const pageGradient = buildGradientCss(colors.gradient, primary, "#0B1220");
 
   const cardColor =
-    colors.cardColor ??
-    rgbaFromHex(cardColorHex, cardOpacity / 100    
-  );
+    colors.cardColor ?? rgbaFromHex(cardColorHex, cardOpacity / 100);
 
   const buttonPrimaryBg = buttons.primaryBg ?? accent;
   const buttonPrimaryText = buttons.primaryText ?? "#0B1220";
   const buttonSecondaryBg = buttons.secondaryBg ?? "#FFFFFF";
   const buttonSecondaryText = buttons.secondaryText ?? "#0F1C2E";
-  
+
   const hero = useMemo(() => theme.hero ?? {}, [theme]);
 
   const heroMode = hero.mode ?? (heroImageUrl ? "image-overlay" : "gradient");
@@ -685,7 +777,9 @@ export default function GuestInvitationPage() {
 
   const mapsUrl =
     venueLat && venueLng
-      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${venueLat},${venueLng}`)}`
+      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+          `${venueLat},${venueLng}`
+        )}`
       : venueAddress
       ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(venueAddress)}`
       : null;
@@ -708,7 +802,7 @@ export default function GuestInvitationPage() {
 
       if (error) throw error;
 
-      setGuest((prev) => (prev ? { ...prev, status: "confirmed" } : prev));
+      await loadInvitation(false);
     } catch (e: any) {
       setErr(getFriendlyInvitationError(e?.message ?? "Gagal konfirmasi kehadiran."));
     } finally {
@@ -830,13 +924,6 @@ export default function GuestInvitationPage() {
 
   const contentBackground = isHeroImageMode ? pageGradient : primary;
 
-  const contentGradient = `linear-gradient(
-    180deg,
-    ${rgbaFromHex(primary, 0.96)} 0%,
-    ${rgbaFromHex(primary, 0.9)} 35%,
-    ${rgbaFromHex(accent, 0.14)} 100%
-  )`;
-
   return (
     <div
       className="min-h-screen"
@@ -845,21 +932,19 @@ export default function GuestInvitationPage() {
         color: adaptiveText.primary,
       }}
     >
-    <section
-      className="relative overflow-hidden"
-      style={{ minHeight: `max(${heroHeight}px, 70vh)` }}
-    >
-      <div
-        className="absolute inset-0"
-        style={{
-          backgroundImage: heroBackground,
-          backgroundPosition:
-            isHeroImageMode ? heroImagePosition : "center",
-          backgroundSize:
-            isHeroImageMode ? heroImageSize : "cover",
-          backgroundRepeat: "no-repeat",
-        }}
-      />
+      <section
+        className="relative overflow-hidden"
+        style={{ minHeight: `max(${heroHeight}px, 70vh)` }}
+      >
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundImage: heroBackground,
+            backgroundPosition: isHeroImageMode ? heroImagePosition : "center",
+            backgroundSize: isHeroImageMode ? heroImageSize : "cover",
+            backgroundRepeat: "no-repeat",
+          }}
+        />
 
         <div className="relative max-w-6xl mx-auto px-6 pt-12 pb-16">
           <div className="mt-16 grid lg:grid-cols-[1.2fr_0.8fr] gap-8 items-start">
@@ -988,9 +1073,12 @@ export default function GuestInvitationPage() {
                   style={{ color: adaptiveText.secondary }}
                 >
                   <Building2 className="w-4 h-4" style={{ color: accent }} />
-                  {guest.organization} {guest.dept_class && (
+                  {guest.organization}
+                  {guest.dept_class && (
                     <>
-                      • <BoxIcon className="w-4 h-4" style={{ color: accent }} /> {guest.dept_class}
+                      {" "}
+                      • <BoxIcon className="w-4 h-4" style={{ color: accent }} />{" "}
+                      {guest.dept_class}
                     </>
                   )}
                 </div>
@@ -1036,6 +1124,7 @@ export default function GuestInvitationPage() {
                     Download E-Ticket
                   </ThemedButton>
                 )}
+
                 {mapsUrl ? (
                   <ThemedButton
                     asChild
@@ -1049,7 +1138,8 @@ export default function GuestInvitationPage() {
                       target="_blank"
                       rel="noreferrer"
                       className="h-11 items-center justify-center px-4 rounded-xl"
-                    > <MapPinHouse className="w-4 h-4 mr-2" />
+                    >
+                      <MapPinHouse className="w-4 h-4 mr-2" />
                       Lihat Lokasi
                     </a>
                   </ThemedButton>
@@ -1059,10 +1149,10 @@ export default function GuestInvitationPage() {
               <div
                 className="p-5 border-b"
                 style={{
-                  background: `linear-gradient(135deg, ${rgbaFromHex(primary, 0.88)}, ${rgbaFromHex(
-                    accent,
-                    0.15
-                  )})`,
+                  background: `linear-gradient(135deg, ${rgbaFromHex(
+                    primary,
+                    0.88
+                  )}, ${rgbaFromHex(accent, 0.15)})`,
                   borderColor: adaptiveText.cardBorder,
                 }}
               >
@@ -1156,222 +1246,236 @@ export default function GuestInvitationPage() {
         </div>
       </section>
 
-    <div
-      className="min-h-screen"
-      style={{
-        background: contentBackground,
-        color: adaptiveText.primary,
-      }}
-    >
-      <section className="mt-4 max-w-6xl mx-auto px-6 pb-4">
-        <div className="grid md:grid-cols-4 gap-4">
-          <div
-            className="rounded-2xl border p-5"
-            style={{
-              backgroundColor: cardColor,
-              borderColor: adaptiveText.cardBorder,
-            }}
-          >
-            <div className="text-sm flex items-center gap-2" style={{ color: adaptiveText.secondary }}>
-              <Info className="w-4 h-4" style={{ color: accent }} />
-              Acara
-            </div>
-            <div className="mt-2 font-semibold" style={{ color: adaptiveText.primary }}>
-              {event.name}
-            </div>
-          </div>
-
-          <div
-            className="rounded-2xl border p-5"
-            style={{
-              backgroundColor: cardColor,
-              borderColor: adaptiveText.cardBorder,
-            }}
-          >
-            <div className="text-sm flex items-center gap-2" style={{ color: adaptiveText.secondary }}>
-              <Calendar className="w-4 h-4" style={{ color: accent }} />
-              Waktu Acara
-            </div>
-            <div className="mt-2 font-semibold" style={{ color: adaptiveText.primary }}>
-              {fmtDate(event.event_date)}
-            </div>
-            <div className="text-sm mt-1" style={{ color: adaptiveText.muted }}>
-              Mulai: {fmtTime(event.event_date)}
-            </div>
-            <div className="text-sm" style={{ color: adaptiveText.muted }}>
-              Selesai: {fmtTime(eventEndDate)}
-            </div>
-          </div>
-
-          <div
-            className="rounded-2xl border p-5"
-            style={{
-              backgroundColor: cardColor,
-              borderColor: adaptiveText.cardBorder,
-            }}
-          >
-            <div className="text-sm flex items-center gap-2" style={{ color: adaptiveText.secondary }}>
-              <MapPin className="w-4 h-4" style={{ color: accent }} />
-              Lokasi
-            </div>
-            <div className="mt-2 font-semibold" style={{ color: adaptiveText.primary }}>
-              {venueName || "Lokasi acara"}
-            </div>
-            <div className="text-sm mt-1" style={{ color: adaptiveText.muted }}>
-              {venueAddress || "Lokasi menyusul"}
-            </div>
-          </div>
-
-          <div
-            className="rounded-2xl border p-5"
-            style={{
-              backgroundColor: cardColor,
-              borderColor: adaptiveText.cardBorder,
-            }}
-          >
-            <div className="text-sm flex items-center gap-2" style={{ color: adaptiveText.secondary }}>
-              <Ticket className="w-4 h-4" style={{ color: accent }} />
-              Dresscode
-            </div>
-
-            <div className="mt-3 space-y-2 text-sm">
-              <div>
-                <span style={{ color: adaptiveText.muted }}>Laki-laki:</span>{" "}
-                <span className="font-semibold" style={{ color: adaptiveText.primary }}>
-                  {dresscodeMale || "-"}
-                </span>
-              </div>
-              <div>
-                <span style={{ color: adaptiveText.muted }}>Perempuan:</span>{" "}
-                <span className="font-semibold" style={{ color: adaptiveText.primary }}>
-                  {dresscodeFemale || "-"}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-    
-      {agenda.length > 0 ? (
-        <section className="max-w-6xl mx-auto px-6 pt-12">
-          <div className="flex items-center justify-between gap-4">
-            <h2 className="text-2xl font-semibold" style={{ color: adaptiveText.primary }}>
-              Susunan Acara
-            </h2>
-          </div>
-
-          <div className="mt-6 space-y-3">
-            {agenda.map((a, idx) => (
+      <div
+        className="min-h-screen"
+        style={{
+          background: contentBackground,
+          color: adaptiveText.primary,
+        }}
+      >
+        <section className="mt-4 max-w-6xl mx-auto px-6 pb-4">
+          <div className="grid md:grid-cols-4 gap-4">
+            <div
+              className="rounded-2xl border p-5"
+              style={{
+                backgroundColor: cardColor,
+                borderColor: adaptiveText.cardBorder,
+              }}
+            >
               <div
-                key={idx}
-                className="rounded-2xl border p-5 flex gap-4"
-                style={{
-                  backgroundColor: cardColor,
-                  borderColor: adaptiveText.cardBorder,
-                }}
+                className="text-sm flex items-center gap-2"
+                style={{ color: adaptiveText.secondary }}
               >
-                <div
-                  className="shrink-0 w-36 text-sm font-mono"
-                  style={{ color: adaptiveText.secondary }}
-                >
-                  {a.start_time || a.time || "-"}
-                  {a.end_time ? ` - ${a.end_time}` : ""}
+                <Info className="w-4 h-4" style={{ color: accent }} />
+                Acara
+              </div>
+              <div className="mt-2 font-semibold" style={{ color: adaptiveText.primary }}>
+                {event.name}
+              </div>
+            </div>
+
+            <div
+              className="rounded-2xl border p-5"
+              style={{
+                backgroundColor: cardColor,
+                borderColor: adaptiveText.cardBorder,
+              }}
+            >
+              <div
+                className="text-sm flex items-center gap-2"
+                style={{ color: adaptiveText.secondary }}
+              >
+                <Calendar className="w-4 h-4" style={{ color: accent }} />
+                Waktu Acara
+              </div>
+              <div className="mt-2 font-semibold" style={{ color: adaptiveText.primary }}>
+                {fmtDate(event.event_date)}
+              </div>
+              <div className="text-sm mt-1" style={{ color: adaptiveText.muted }}>
+                Mulai: {fmtTime(event.event_date)}
+              </div>
+              <div className="text-sm" style={{ color: adaptiveText.muted }}>
+                Selesai: {fmtTime(eventEndDate)}
+              </div>
+            </div>
+
+            <div
+              className="rounded-2xl border p-5"
+              style={{
+                backgroundColor: cardColor,
+                borderColor: adaptiveText.cardBorder,
+              }}
+            >
+              <div
+                className="text-sm flex items-center gap-2"
+                style={{ color: adaptiveText.secondary }}
+              >
+                <MapPin className="w-4 h-4" style={{ color: accent }} />
+                Lokasi
+              </div>
+              <div className="mt-2 font-semibold" style={{ color: adaptiveText.primary }}>
+                {venueName || "Lokasi acara"}
+              </div>
+              <div className="text-sm mt-1" style={{ color: adaptiveText.muted }}>
+                {venueAddress || "Lokasi menyusul"}
+              </div>
+            </div>
+
+            <div
+              className="rounded-2xl border p-5"
+              style={{
+                backgroundColor: cardColor,
+                borderColor: adaptiveText.cardBorder,
+              }}
+            >
+              <div
+                className="text-sm flex items-center gap-2"
+                style={{ color: adaptiveText.secondary }}
+              >
+                <Ticket className="w-4 h-4" style={{ color: accent }} />
+                Dresscode
+              </div>
+
+              <div className="mt-3 space-y-2 text-sm">
+                <div>
+                  <span style={{ color: adaptiveText.muted }}>Laki-laki:</span>{" "}
+                  <span className="font-semibold" style={{ color: adaptiveText.primary }}>
+                    {dresscodeMale || "-"}
+                  </span>
                 </div>
-                <div className="flex-1">
-                  <div className="font-semibold" style={{ color: adaptiveText.primary }}>
-                    {a.title}
+                <div>
+                  <span style={{ color: adaptiveText.muted }}>Perempuan:</span>{" "}
+                  <span className="font-semibold" style={{ color: adaptiveText.primary }}>
+                    {dresscodeFemale || "-"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {agenda.length > 0 ? (
+          <section className="max-w-6xl mx-auto px-6 pt-12">
+            <div className="flex items-center justify-between gap-4">
+              <h2 className="text-2xl font-semibold" style={{ color: adaptiveText.primary }}>
+                Susunan Acara
+              </h2>
+            </div>
+
+            <div className="mt-6 space-y-3">
+              {agenda.map((a, idx) => (
+                <div
+                  key={idx}
+                  className="rounded-2xl border p-5 flex gap-4"
+                  style={{
+                    backgroundColor: cardColor,
+                    borderColor: adaptiveText.cardBorder,
+                  }}
+                >
+                  <div
+                    className="shrink-0 w-36 text-sm font-mono"
+                    style={{ color: adaptiveText.secondary }}
+                  >
+                    {a.start_time || a.time || "-"}
+                    {a.end_time ? ` - ${a.end_time}` : ""}
                   </div>
-                  {a.note ? (
-                    <div className="text-sm mt-1" style={{ color: adaptiveText.muted }}>
-                      {a.note}
+                  <div className="flex-1">
+                    <div className="font-semibold" style={{ color: adaptiveText.primary }}>
+                      {a.title}
                     </div>
-                  ) : null}
+                    {a.note ? (
+                      <div className="text-sm mt-1" style={{ color: adaptiveText.muted }}>
+                        {a.note}
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
+              ))}
+            </div>
+          </section>
+        ) : null}
 
-      {faqs.length > 0 ? (
-        <section className="max-w-6xl mx-auto px-6 pt-12">
-          <h2 className="text-2xl font-semibold" style={{ color: adaptiveText.primary }}>
-            Informasi Tambahan
-          </h2>
+        {faqs.length > 0 ? (
+          <section className="max-w-6xl mx-auto px-6 pt-12">
+            <h2 className="text-2xl font-semibold" style={{ color: adaptiveText.primary }}>
+              Informasi Tambahan
+            </h2>
 
-          <div className="mt-6 space-y-3">
-            {faqs.map((f, idx) => (
-              <div
-                key={idx}
-                className="rounded-2xl border p-5"
-                style={{
-                  backgroundColor: cardColor,
-                  borderColor: adaptiveText.cardBorder,
-                }}
-              >
-                <div className="font-semibold" style={{ color: adaptiveText.primary }}>
-                  {f.q}
-                </div>
+            <div className="mt-6 space-y-3">
+              {faqs.map((f, idx) => (
                 <div
-                  className="mt-2 leading-relaxed"
-                  style={{ color: adaptiveText.secondary }}
+                  key={idx}
+                  className="rounded-2xl border p-5"
+                  style={{
+                    backgroundColor: cardColor,
+                    borderColor: adaptiveText.cardBorder,
+                  }}
                 >
-                  {f.a}
+                  <div className="font-semibold" style={{ color: adaptiveText.primary }}>
+                    {f.q}
+                  </div>
+                  <div
+                    className="mt-2 leading-relaxed"
+                    style={{ color: adaptiveText.secondary }}
+                  >
+                    {f.a}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        <section className="max-w-6xl mx-auto px-6 py-16">
+          <div
+            className="rounded-3xl border p-8 text-center"
+            style={{
+              backgroundColor: cardColor,
+              borderColor: adaptiveText.cardBorder,
+            }}
+          >
+            <div className="inline-flex items-center" style={{ color: adaptiveText.secondary }}>
+              {brand.logoUrl ? (
+                <img src={brand.logoUrl} alt="Logo" className="h-25" />
+              ) : (
+                <span>
+                  <CheckCheck className="w-5 h-5" style={{ color: accent }} />
+                </span>
+              )}
+            </div>
+
+            <div
+              className="mt-6 leading-relaxed max-w-2xl mx-auto"
+              style={{ color: adaptiveText.secondary }}
+            >
+              {closingText}
+            </div>
+
+            <div
+              className="mt-6 leading-relaxed max-w-2xl mx-auto"
+              style={{ color: adaptiveText.muted }}
+            >
+              Hormat kami,
+              <br />
+              <span className="font-medium" style={{ color: adaptiveText.primary }}>
+                {hostName || "-"}
+              </span>
+            </div>
+
+            <div className="mt-6 text-xs" style={{ color: adaptiveText.soft }}>
+              Powered by Invitara • Mental Coaching Character
+            </div>
           </div>
         </section>
-      ) : null}
 
-      <section className="max-w-6xl mx-auto px-6 py-16">
-        <div
-          className="rounded-3xl border p-8 text-center"
-          style={{
-            backgroundColor: cardColor,
-            borderColor: adaptiveText.cardBorder,
-          }}
-        >
-          <div className="inline-flex items-center" style={{ color: adaptiveText.secondary }}>
-            {brand.logoUrl ? (
-              <img src={brand.logoUrl} alt="Logo" className="h-25" />
-            ) : (
-              <span><CheckCheck className="w-5 h-5" style={{ color: accent }} /></span>
-            )}
+        {err ? (
+          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50">
+            <div className="rounded-xl border border-red-300/30 bg-red-500/15 px-4 py-3 text-sm text-red-200 backdrop-blur">
+              {err}
+            </div>
           </div>
-
-          <div
-            className="mt-6 leading-relaxed max-w-2xl mx-auto"
-            style={{ color: adaptiveText.secondary }}
-          >
-            {closingText}
-          </div>
-
-          <div
-            className="mt-6 leading-relaxed max-w-2xl mx-auto"
-            style={{ color: adaptiveText.muted }}
-          >
-            Hormat kami,
-            <br />
-            <span className="font-medium" style={{ color: adaptiveText.primary }}>
-              {hostName || "-"}
-            </span>
-          </div>
-
-          <div className="mt-6 text-xs" style={{ color: adaptiveText.soft }}>
-            Powered by Invitara • Mental Coaching Character
-          </div>
-        </div>
-      </section>
-
-      {err ? (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50">
-          <div className="rounded-xl border border-red-300/30 bg-red-500/15 px-4 py-3 text-sm text-red-200 backdrop-blur">
-            {err}
-          </div>
-        </div>
-      ) : null}
-     </div> 
+        ) : null}
+      </div>
     </div>
   );
 }
