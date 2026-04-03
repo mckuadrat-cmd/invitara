@@ -159,6 +159,12 @@ export default function SettingsPage() {
   const [allowReentry, setAllowReentry] = useState(false);
   const [vipBadgeColor, setVipBadgeColor] = useState("#D6C6A5");
 
+  const [themeTextMode, setThemeTextMode] = useState<"auto" | "manual">("auto");
+
+  const [themeTextPrimary, setThemeTextPrimary] = useState("#FFFFFF");
+  const [themeTextSecondary, setThemeTextSecondary] = useState("#E5E7EB");
+  const [themeTextMuted, setThemeTextMuted] = useState("#9CA3AF");
+
   const [themePrimary, setThemePrimary] = useState("#0F1C2E");
   const [themeAccent, setThemeAccent] = useState("#D6C6A5");
 
@@ -229,6 +235,28 @@ export default function SettingsPage() {
   }, [themeCardColorHex, themeCardOpacity]);
 
   const autoTextMode = useMemo(() => isDarkColor(themePageBaseColor), [themePageBaseColor]);
+
+  const previewTextColors = useMemo(() => {
+    if (themeTextMode === "manual") {
+      return {
+        primary: themeTextPrimary,
+        secondary: themeTextSecondary,
+        muted: themeTextMuted,
+      };
+    }
+
+    return {
+      primary: autoTextMode ? "#FFFFFF" : "#111827",
+      secondary: autoTextMode ? "rgba(255,255,255,0.82)" : "rgba(17,24,39,0.82)",
+      muted: autoTextMode ? "rgba(255,255,255,0.64)" : "rgba(17,24,39,0.64)",
+    };
+  }, [
+    themeTextMode,
+    themeTextPrimary,
+    themeTextSecondary,
+    themeTextMuted,
+    autoTextMode,
+  ]);
 
   async function uploadAsset(file: File, folder: "logos" | "heroes") {
     if (!eventId) throw new Error("Event ID tidak ditemukan.");
@@ -346,6 +374,12 @@ export default function SettingsPage() {
     const locationData = t.locationData ?? {};
     const gradient = colors.gradient ?? {};
     const hero = t.hero ?? {};
+    const text = t.text ?? {};
+
+    setThemeTextMode(text.mode === "manual" ? "manual" : "auto");
+    setThemeTextPrimary(text.primary ?? "#FFFFFF");
+    setThemeTextSecondary(text.secondary ?? "#E5E7EB");
+    setThemeTextMuted(text.muted ?? "#9CA3AF");
 
     setEventName(e.name ?? "");
     setEventStartDate(isoToLocalInput(e.event_date));
@@ -515,6 +549,12 @@ export default function SettingsPage() {
           cardColorHex: themeCardColorHex,
           cardOpacity: finalCardOpacity,
           cardColor: rgbaFromHex(themeCardColorHex, finalCardOpacity / 100),
+        },
+        text: {
+          mode: themeTextMode,
+          primary: themeTextPrimary,
+          secondary: themeTextSecondary,
+          muted: themeTextMuted,
         },
         buttons: {
           primaryBg: themeButtonPrimaryBg,
@@ -828,18 +868,57 @@ export default function SettingsPage() {
               </div>
 
               <div className="md:col-span-2">
-                <Label>Preview Auto Text</Label>
+                <Label>Preview Text</Label>
                 <div
                   className="h-12 rounded-xl border px-3 flex items-center text-sm"
                   style={{
                     background: themePageBaseColor,
-                    color: autoTextMode ? "#FFFFFF" : "#111827",
+                    color: previewTextColors.primary
                   }}
                 >
-                  {autoTextMode ? "Background gelap → text terang" : "Background terang → text gelap"}
+                  Pilih warna teks yang sesuai
                 </div>
               </div>
             </div>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Text Color</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+
+                  <Select value={themeTextMode} onValueChange={(v:any)=>setThemeTextMode(v)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">Otomatis</SelectItem>
+                      <SelectItem value="manual">Manual</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {themeTextMode === "manual" && (
+                    <>
+                    <div className="grid md:grid-cols-3 gap-4 items-end">
+                      <div>
+                        <Label>Primary Text</Label>
+                        <Input type="color" value={themeTextPrimary} onChange={(e)=>setThemeTextPrimary(e.target.value)} />
+                      </div>
+
+                      <div>
+                        <Label>Secondary Text</Label>
+                        <Input type="color" value={themeTextSecondary} onChange={(e)=>setThemeTextSecondary(e.target.value)} />
+                      </div>
+
+                      <div>
+                        <Label>Muted Text</Label>
+                        <Input type="color" value={themeTextMuted} onChange={(e)=>setThemeTextMuted(e.target.value)} />
+                      </div>
+                    </div>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
 
             <div className="rounded-xl border border-gray-200 p-4 space-y-4">
               <div className="flex items-center justify-between gap-4">
@@ -990,10 +1069,10 @@ export default function SettingsPage() {
                     style={{
                       backgroundColor: cardPreview,
                       borderColor: "rgba(255,255,255,0.15)",
-                      color: autoTextMode ? "#FFFFFF" : "#111827",
+                      color: previewTextColors.primary
                     }}
                   >
-                    Ini preview warna card.
+                    Ini preview warna card dan teks yang sesuai.
                   </div>
                 </div>
               </div>

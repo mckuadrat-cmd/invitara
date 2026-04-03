@@ -391,6 +391,48 @@ function primaryFallback(hex: string) {
   return hex || "#0F1C2E";
 }
 
+function getFriendlyInvitationError(message?: string | null) {
+  const msg = String(message || "").toLowerCase();
+
+  if (
+    msg.includes("undangan belum tersedia") ||
+    msg.includes("draft") ||
+    msg.includes("forbidden") ||
+    msg.includes("403")
+  ) {
+    return "Undangan belum tersedia. Silakan hubungi panitia.";
+  }
+
+  if (
+    msg.includes("undangan tidak ditemukan") ||
+    msg.includes("peserta tidak ditemukan") ||
+    msg.includes("not found") ||
+    msg.includes("404") ||
+    msg.includes("kode undangan")
+  ) {
+    return "Kode undangan tidak ditemukan. Periksa kembali link undangan Anda.";
+  }
+
+  if (
+    msg.includes("event tidak ditemukan") ||
+    msg.includes("data acara") ||
+    msg.includes("event")
+  ) {
+    return "Data acara belum lengkap. Silakan hubungi panitia.";
+  }
+
+  if (
+    msg.includes("edge function returned a non-2xx status code") ||
+    msg.includes("failed to fetch") ||
+    msg.includes("network") ||
+    msg.includes("fetch")
+  ) {
+    return "Terjadi kendala saat memuat undangan. Silakan coba lagi beberapa saat lagi.";
+  }
+
+  return "Terjadi kendala saat memuat undangan. Silakan coba lagi beberapa saat lagi.";
+}
+
 export default function GuestInvitationPage() {
   const { code } = useParams();
   const guestCode = useMemo(() => String(code ?? "").trim().toUpperCase(), [code]);
@@ -413,33 +455,38 @@ export default function GuestInvitationPage() {
 
         if (!guestCode) throw new Error("Kode undangan tidak ditemukan.");
 
-        const { data: g, error: gErr } = await supabase
-          .from("guests")
-          .select("id,event_id,identity_no,full_name,email,phone,organization,dept_class,unique_code,status,checkin_time")
-          .eq("unique_code", guestCode)
-          .single();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
 
-        if (gErr || !g) throw new Error(gErr?.message ?? "Peserta tidak ditemukan.");
-        const guestRow = g as GuestRow;
+        const headers: Record<string, string> = {};
+        if (session?.access_token) {
+          headers.Authorization = `Bearer ${session.access_token}`;
+        }
+
+        const { data, error } = await supabase.functions.invoke("public-invitation", {
+          body: { code: guestCode },
+          headers,
+        });
+
+        if (error) {
+          throw new Error(
+            data?.error ||
+              error.message ||
+              "Gagal memuat undangan."
+          );
+        }
+
+        if (!data?.guest || !data?.event) {
+          throw new Error("Undangan tidak ditemukan.");
+        }
+
+        const guestRow = data.guest as GuestRow;
+        const eventRow = data.event as EventRow;
+        const fmt = String(data.qrFormat ?? "QR Code v1");
+
         setGuest(guestRow);
-
-        const { data: ev, error: evErr } = await supabase
-          .from("events")
-          .select("id,name,slug,event_date,location,status,theme,event_code")
-          .eq("id", guestRow.event_id)
-          .single();
-
-        if (evErr || !ev) throw new Error(evErr?.message ?? "Event tidak ditemukan.");
-        const eventRow = ev as EventRow;
         setEvent(eventRow);
-
-        const { data: st } = await supabase
-          .from("event_settings")
-          .select("event_id,qr_format")
-          .eq("event_id", guestRow.event_id)
-          .maybeSingle();
-
-        const fmt = (st as EventSettingsRow | null)?.qr_format ?? "QR Code v1";
         setQrFormat(fmt);
 
         const origin = window.location.origin;
@@ -457,13 +504,19 @@ export default function GuestInvitationPage() {
         }
 
         if (fmt === "QR Code v3") {
-          const { data, error } = await supabase.functions.invoke("ticket_sign", {
-            body: { eventId: guestRow.event_id, code: guestCode },
-          });
+          const { data: signData, error: signErr } = await supabase.functions.invoke(
+            "ticket_sign",
+            {
+              body: { eventId: guestRow.event_id, code: guestCode },
+              headers,
+            }
+          );
 
-          if (error) throw new Error(error.message);
+          if (signErr) {
+            throw new Error(signData?.error || signErr.message || "Gagal membuat token QR.");
+          }
 
-          const token = data?.token;
+          const token = signData?.token;
           if (!token) throw new Error("Token QR tidak berhasil dibuat.");
 
           payloadText = `${origin}/admin/event/${guestRow.event_id}/scanner?t=${encodeURIComponent(
@@ -478,7 +531,7 @@ export default function GuestInvitationPage() {
 
         setQrDataUrl(qr);
       } catch (e: any) {
-        setErr(e?.message ?? "Gagal memuat undangan.");
+        setErr(getFriendlyInvitationError(e?.message ?? "Gagal memuat undangan."));
       } finally {
         setLoading(false);
       }
@@ -512,10 +565,19 @@ export default function GuestInvitationPage() {
       ? Math.min(100, Math.max(0, colors.cardOpacity))
       : 8;
 
-  const adaptiveText = useMemo(
-    () => getAdaptiveTextColors(pageBaseColor),
-    [pageBaseColor]
-  );
+  const textConfig = event?.theme?.text;
+
+  const adaptiveText = textConfig?.mode === "manual"
+    ? {
+        primary: textConfig.primary,
+        secondary: textConfig.secondary,
+        muted: textConfig.muted,
+        soft: textConfig.muted,
+        border: "rgba(255,255,255,0.12)",
+        cardBorder: "rgba(255,255,255,0.10)",
+        cardSoft: "rgba(255,255,255,0.06)",
+      }
+    : getAdaptiveTextColors(pageBaseColor);
 
   const pageGradient = buildGradientCss(colors.gradient, primary, "#0B1220");
 
@@ -648,7 +710,7 @@ export default function GuestInvitationPage() {
 
       setGuest((prev) => (prev ? { ...prev, status: "confirmed" } : prev));
     } catch (e: any) {
-      setErr(e?.message ?? "Gagal konfirmasi kehadiran.");
+      setErr(getFriendlyInvitationError(e?.message ?? "Gagal konfirmasi kehadiran."));
     } finally {
       setActionLoading(false);
     }
@@ -728,8 +790,24 @@ export default function GuestInvitationPage() {
 
   if (err && !guest && !event) {
     return (
-      <div className="min-h-screen p-10 text-red-400" style={{ background: pageGradient }}>
-        {err}
+      <div
+        className="min-h-screen flex items-center justify-center px-6"
+        style={{ background: pageGradient, color: adaptiveText.primary }}
+      >
+        <div
+          className="max-w-lg w-full rounded-3xl border p-8 text-center"
+          style={{
+            backgroundColor: cardColor,
+            borderColor: adaptiveText.cardBorder,
+          }}
+        >
+          <div className="text-2xl font-semibold" style={{ color: adaptiveText.primary }}>
+            Undangan Belum Dapat Ditampilkan
+          </div>
+          <div className="mt-3 leading-relaxed" style={{ color: adaptiveText.secondary }}>
+            {err}
+          </div>
+        </div>
       </div>
     );
   }
@@ -813,11 +891,11 @@ export default function GuestInvitationPage() {
 
               <div className="mt-4 flex items-center gap-5">
                 {brand.logoUrl && (
-                  <div className="bg-white/10 backdrop-blur-md p-2 rounded-xl border border-white/10">
+                  <div className="bg-white/5 backdrop-blur-md p-1 px-4 object-cover rounded-xl border border-white/10">
                     <img
                       src={brand.logoUrl}
                       alt="Logo"
-                      className="h-25 md:h-25 w-auto object-contain"
+                      className="h-30 md:h-30 w-auto object-contain"
                     />
                   </div>
                 )}

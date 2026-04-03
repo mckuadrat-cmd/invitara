@@ -17,6 +17,9 @@ import {
   Plus,
   X,
   Check,
+  Image as ImageIcon,
+  CheckCircle2,
+  Loader2,
 } from "lucide-react";
 import { Input } from "../../components/ui/input";
 import { Button } from "../../components/ui/button";
@@ -63,6 +66,7 @@ type GuestRow = {
   organization: string | null;
   dept_class: string | null;      // ✅ baru
   unique_code: string;
+  photo_url: string | null;     // ✅ baru
   status: GuestStatus;
   checkin_time: string | null;
   created_at: string;
@@ -115,6 +119,37 @@ function normalizePhone(countryCode: string, raw: string) {
   return ccDigits + s;
 }
 
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+
+function buildGuestPhotoUrl(eventCode: string, uniqueCode: string) {
+  return `${SUPABASE_URL}/storage/v1/object/public/guest-photos/${eventCode}/${uniqueCode}.jpg`;
+}
+
+async function convertImageToJpg(file: File, quality = 0.92): Promise<File> {
+  const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas context tidak tersedia.");
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(bitmap, 0, 0);
+
+  const blob: Blob = await new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error("Gagal convert ke JPG"))),
+      "image/jpeg",
+      quality
+    );
+  });
+
+  const newName = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+  return new File([blob], newName, { type: "image/jpeg" });
+}
+
 export default function GuestListPage() {
   const [role, setRole] = useState<"owner" | "admin" | "scanner">("admin");
     useEffect(() => {
@@ -162,6 +197,8 @@ export default function GuestListPage() {
   });
   const [deletingAll, setDeletingAll] = useState(false);
   const importFileRef = useRef<HTMLInputElement | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmMode, setConfirmMode] = useState<"one" | "all" | "confirm_all">("one");
@@ -179,6 +216,137 @@ export default function GuestListPage() {
 
   // Status update state
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
+  const [uploadingPhotoId, setUploadingPhotoId] = useState<string | null>(null);
+  const photoInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [uploadingZip, setUploadingZip] = useState(false);
+  const zipInputRef = useRef<HTMLInputElement | null>(null);
+
+  async function uploadGuestPhoto(file: File, guest: GuestRow) {
+    if (!event?.event_code) {
+      setErr("event_code belum ada di event ini.");
+      return;
+    }
+
+    try {
+      setErr(null);
+      setUploadingPhotoId(guest.id);
+
+      const jpgFile = await convertImageToJpg(file);
+      const filePath = `${event.event_code}/${guest.unique_code}.jpg`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("guest-photos")
+        .upload(filePath, jpgFile, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const photoUrl = buildGuestPhotoUrl(event.event_code, guest.unique_code);
+
+      const { error: dbError } = await supabase
+        .from("guests")
+        .update({ photo_url: photoUrl })
+        .eq("id", guest.id);
+
+      if (dbError) throw dbError;
+
+      setGuests((prev) =>
+        prev.map((g) =>
+          g.id === guest.id ? { ...g, photo_url: photoUrl } : g
+        )
+      );
+    } catch (e: any) {
+      setErr(e?.message ?? "Gagal upload foto.");
+    } finally {
+      setUploadingPhotoId(null);
+    }
+  }
+
+  async function uploadGuestZip(file: File) {
+    if (!event?.event_code) {
+      setErr("event_code belum ada di event ini.");
+      return;
+    }
+
+    try {
+      setErr(null);
+      setUploadingZip(true);
+      toast.loading("Sedang upload ZIP foto...", { id: "zip-photo" });
+
+      const zip = await JSZip.loadAsync(file);
+
+      let success = 0;
+      let failed = 0;
+      let notMatched = 0;
+      let skipped = 0;
+
+      const guestMap = new Map(
+        guests.map((g) => [String(g.unique_code).trim().toUpperCase(), g])
+      );
+
+      const entries = Object.keys(zip.files);
+
+      for (const name of entries) {
+        const entry = zip.files[name];
+        if (entry.dir) continue;
+
+        const base = name.split("/").pop() || "";
+        if (!base) continue;
+
+        const isImage = /\.(jpg|jpeg|png|webp)$/i.test(base);
+        if (!isImage) {
+          skipped++;
+          continue;
+        }
+
+        const code = base.replace(/\.[^.]+$/, "").trim().toUpperCase();
+        const guest = guestMap.get(code);
+
+        if (!guest) {
+          notMatched++;
+          continue;
+        }
+
+        try {
+          const blob = await entry.async("blob");
+          const originalFile = new File([blob], base, { type: blob.type || "image/*" });
+
+          const jpgFile = await convertImageToJpg(originalFile);
+          const filePath = `${event.event_code}/${guest.unique_code}.jpg`;
+
+          const { error: uploadError } = await supabase.storage
+            .from("guest-photos")
+            .upload(filePath, jpgFile, { upsert: true });
+
+          if (uploadError) throw uploadError;
+
+          const photoUrl = buildGuestPhotoUrl(event.event_code, guest.unique_code);
+
+          const { error: dbError } = await supabase
+            .from("guests")
+            .update({ photo_url: photoUrl })
+            .eq("id", guest.id);
+
+          if (dbError) throw dbError;
+
+          success++;
+        } catch {
+          failed++;
+        }
+      }
+
+      await loadGuests();
+
+      toast.success(
+        `ZIP selesai. Success: ${success}, Failed: ${failed}, Not matched: ${notMatched}, Skipped: ${skipped}`,
+        { id: "zip-photo" }
+      );
+    } catch (e: any) {
+      setErr(e?.message ?? "Gagal upload ZIP foto.");
+      toast.error(e?.message ?? "Gagal upload ZIP foto.", { id: "zip-photo" });
+    } finally {
+      setUploadingZip(false);
+    }
+  }
 
   function openTicket(uniqueCode: string) {
     window.open(`/u/${encodeURIComponent(uniqueCode)}`, "_blank");
@@ -354,6 +522,7 @@ export default function GuestListPage() {
       unique_code:
         String(r.unique_code ?? "").trim().toUpperCase() || makeCode(),
       status: (String(r.status ?? "registered").trim() as any) || "registered",
+      photo_url: String(r.photo_url ?? "").trim() || null,
     }));
 
     const clean = rows.filter((r) => r.full_name);
@@ -392,8 +561,8 @@ export default function GuestListPage() {
       const uiStatus = statusToUi(g.status);
 
       const matchesSearch =
+        (g.identity_no ?? "").toLowerCase().includes(q) ||
         (g.full_name ?? "").toLowerCase().includes(q) ||
-        (g.email ?? "").toLowerCase().includes(q) ||
         (g.organization ?? "").toLowerCase().includes(q) ||
         (g.unique_code ?? "").toLowerCase().includes(q);
 
@@ -401,6 +570,23 @@ export default function GuestListPage() {
       return matchesSearch && matchesStatus;
     });
   }, [guests, searchQuery, statusFilter]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, statusFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredGuests.length / pageSize));
+
+  const paginatedGuests = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredGuests.slice(start, start + pageSize);
+  }, [filteredGuests, page, pageSize]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(1);
+    }
+  }, [page, totalPages]);
 
   const getStatusBadge = (uiStatus: string) => {
     switch (uiStatus) {
@@ -784,7 +970,7 @@ export default function GuestListPage() {
           </p>
         </div>
 
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-1 flex-wrap">
           <Button
             onClick={loadGuests}
             variant="outline"
@@ -802,7 +988,7 @@ export default function GuestListPage() {
               disabled={loading || guests.length === 0}
             >
               <Download className="w-4 h-4 mr-2" />
-              Export CSV
+              Export
             </Button>
           )}
 
@@ -829,9 +1015,34 @@ export default function GuestListPage() {
               onClick={() => importFileRef.current?.click()}
             >
               <Upload className="w-4 h-4 mr-2" />
-              Import CSV
+              Import
             </Button>
           </label>
+
+          <input
+            ref={zipInputRef}
+            type="file"
+            accept=".zip"
+            className="hidden"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              await uploadGuestZip(file);
+              e.currentTarget.value = "";
+            }}
+          />
+
+          <Button
+            type="button"
+            variant="outline"
+            className="border-[#0F1C2E]/20"
+            disabled={loading || uploadingZip || !event?.event_code || guests.length === 0}
+            onClick={() => zipInputRef.current?.click()}
+            title={!event?.event_code ? "event_code belum ada" : "Upload photos"}
+          >
+            <Upload className="w-4 h-4 mr-2" />
+            {uploadingZip ? "Uploading..." : "Upload Photos"}
+          </Button>
 
           <Button
             onClick={sendAllFiltered}
@@ -1089,7 +1300,7 @@ export default function GuestListPage() {
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
               <Input
-                placeholder="Search by name, email, organization, or code..."
+                placeholder="Search by identity number, name, organization, or code..."
                 className="pl-10"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -1124,60 +1335,107 @@ export default function GuestListPage() {
       {/* Guest Table */}
       <Card className="border-none shadow-lg">
         <CardContent className="mt-5 flex-1 overflow-y-auto pr-1 space-y-3">
-          <div className="overflow-x-auto">
-            <Table>
+          <div className="w-full overflow-hidden">
+            <Table className="w-full table-fixed">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="text-[#0F1C2E]">No Identity</TableHead>
-                  <TableHead className="text-[#0F1C2E]">Name</TableHead>
-                  <TableHead className="text-[#0F1C2E]">Email</TableHead>
-                  <TableHead className="text-[#0F1C2E]">Phone</TableHead>
-                  <TableHead className="text-[#0F1C2E]">Organization</TableHead>
-                  <TableHead className="text-[#0F1C2E]">Dept/Class</TableHead>
-                  <TableHead className="text-[#0F1C2E]">Unique Code</TableHead>
-                  <TableHead className="text-[#0F1C2E]">Status</TableHead>
-                  <TableHead className="text-[#0F1C2E]">Check-in Time</TableHead>
-                  <TableHead className="text-[#0F1C2E] text-right">Actions</TableHead>
+                  <TableHead className="w-[110px] text-[#0F1C2E]">No Identity</TableHead>
+                  <TableHead className="w-[180px] text-[#0F1C2E]">Name</TableHead>
+                  <TableHead className="w-[100px] text-[#0F1C2E]">Email</TableHead>
+                  <TableHead className="w-[100px] text-[#0F1C2E]">Phone</TableHead>
+                  <TableHead className="w-[140px] text-[#0F1C2E]">Organization</TableHead>
+                  <TableHead className="w-[110px] text-[#0F1C2E]">Dept/Class</TableHead>
+                  <TableHead className="w-[130px] text-[#0F1C2E]">Unique Code</TableHead>
+                  <TableHead className="w-[70px] text-center text-[#0F1C2E]">Photo</TableHead>
+                  <TableHead className="w-[120px] text-[#0F1C2E]">Status</TableHead>
+                  <TableHead className="w-[120px] text-[#0F1C2E]">Check-in</TableHead>
+                  <TableHead className="w-[150px] text-right text-[#0F1C2E]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
 
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-12 text-gray-500">
+                    <TableCell colSpan={11} className="text-center py-12 text-gray-500">
                       Loading guests...
                     </TableCell>
                   </TableRow>
                 ) : filteredGuests.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-12 text-gray-500">
+                    <TableCell colSpan={11} className="text-center py-12 text-gray-500">
                       No guests found matching your criteria
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredGuests.map((g) => {
+                  paginatedGuests.map((g) => {
                     const uiStatus = statusToUi(g.status);
                     const hasEmail = !!g.email;
 
                     return (
                       <TableRow key={g.id} className="hover:bg-[#F5F7FA]/50">
                         <TableCell className="font-medium text-[#0F1C2E]">{g.identity_no ?? "—"}</TableCell>
-                        <TableCell className="font-medium text-[#0F1C2E]">
+                        <TableCell className="font-medium text-[#0F1C2E] truncate">
                           {g.full_name}
                         </TableCell>
-                        <TableCell className="text-gray-600">{g.email ?? "—"}</TableCell>
-                        <TableCell className="text-gray-600">{g.phone ?? "—"}</TableCell>
-                        <TableCell className="text-gray-600">{g.organization ?? "—"}</TableCell>
-                        <TableCell className="text-gray-600">{g.dept_class ?? "—"}</TableCell>
+                        <TableCell className="text-gray-600 truncate">{g.email ?? "—"}</TableCell>
+                        <TableCell className="text-gray-600 truncate">{g.phone ?? "—"}</TableCell>
+                        <TableCell className="text-gray-600 truncate">{g.organization ?? "—"}</TableCell>
+                        <TableCell className="text-gray-600 truncate">{g.dept_class ?? "—"}</TableCell>
                         <TableCell>
-                          <code className="bg-gray-100 px-2 py-1 rounded text-sm">
+                          <code className="block truncate bg-gray-100 px-2 py-1 rounded text-sm">
                             {g.unique_code}
                           </code>
                         </TableCell>
+
+                        <TableCell className="text-center">
+                          <input
+                            ref={(el) => {
+                              photoInputRefs.current[g.id] = el;
+                            }}
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              await uploadGuestPhoto(file, g);
+                              setTimeout(() => {
+                                if (e.target) (e.target as HTMLInputElement).value = "";
+                              }, 0);
+                            }}
+                          />
+
+                          {uploadingPhotoId === g.id ? (
+                            <div className="inline-flex items-center justify-center">
+                              <Loader2 className="w-5 h-5 animate-spin text-gray-500" />
+                            </div>
+                              ) : g.photo_url ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="border-[#0F1C2E]/20"
+                                  title="Foto sudah ada - klik untuk ganti"
+                                  onClick={() => photoInputRefs.current[g.id]?.click()}
+                                >
+                                  <CheckCircle2 className="w-5 h-5 text-green-600" />
+                                </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="border-[#0F1C2E]/20"
+                              title="Upload foto"
+                              onClick={() => photoInputRefs.current[g.id]?.click()}
+                            >
+                              <Upload className="w-4 h-4 text-[#0F1C2E]" />
+                            </Button>
+                          )}
+                        </TableCell>
+
                         <TableCell>
                           <button
                             type="button"
-                            className="inline-flex items-center gap-2 hover:opacity-90 active:scale-[0.99] transition"
+                            className="inline-flex items-center gap-2 hover:opacity-55 active:scale-[0.99] transition"
                             onClick={() => cycleGuestStatus(g)}
                             disabled={updatingStatusId === g.id}
                             title="Klik untuk ubah status: Registered → Confirmed → Checked In"
@@ -1200,7 +1458,7 @@ export default function GuestListPage() {
                         </TableCell>
 
                         <TableCell className="text-right">
-                          <div className="flex gap-2 justify-end">
+                          <div className="flex gap-1 justify-end">
                             <Button
                               size="sm"
                               variant="outline"
@@ -1214,13 +1472,16 @@ export default function GuestListPage() {
                             <Button
                               size="sm"
                               variant="outline"
-                              className="border-[#0F1C2E]/20"
+                              className="border-[#0F1C2E]/20 px-2"
                               disabled={!hasEmail || sendingId === g.id || bulkSending}
                               onClick={() => sendTicket(g)}
                               title={!hasEmail ? "Guest belum ada email" : "Send ticket email"}
                             >
-                              <Mail className="w-4 h-4 mr-2" />
-                              {sendingId === g.id ? "Sending..." : "Send"}
+                              {sendingId === g.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Mail className="w-4 h-4" />
+                              )}
                             </Button>
 
                             <Button
@@ -1249,8 +1510,59 @@ export default function GuestListPage() {
       </Card>
 
       {!loading && (
-        <div className="mt-4 text-sm text-gray-600 text-center">
-          Showing {filteredGuests.length} of {guests.length} guests
+        <div className="mt-4 flex flex-col md:flex-row items-center justify-between gap-3 text-sm text-gray-600">
+          <div>
+            Showing{" "}
+            <b>{filteredGuests.length === 0 ? 0 : (page - 1) * pageSize + 1}</b>
+            {" "}to{" "}
+            <b>{Math.min(page * pageSize, filteredGuests.length)}</b>
+            {" "}of <b>{filteredGuests.length}</b> guests
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span>Rows:</span>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(v) => {
+                setPageSize(Number(v));
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="w-[90px] h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="10">10</SelectItem>
+                <SelectItem value="25">25</SelectItem>
+                <SelectItem value="50">50</SelectItem>
+                <SelectItem value="100">100</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={page === 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Prev
+            </Button>
+
+            <span>
+              Page <b>{page}</b> / <b>{totalPages}</b>
+            </span>
+
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Next
+            </Button>
+          </div>
         </div>
       )}
     </div>

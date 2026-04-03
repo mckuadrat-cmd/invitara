@@ -30,7 +30,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "../../components/ui/alert-dialog";
-import { UserPlus, Trash2, RefreshCw, Mail, ShieldCheck, Clock3 } from "lucide-react";
+import {
+  UserPlus,
+  Trash2,
+  RefreshCw,
+  Mail,
+  ShieldCheck,
+  Clock3,
+  CheckCircle2,
+  UserRoundPlus,
+} from "lucide-react";
 import { toast } from "sonner";
 
 type GlobalRole = "owner" | "staff";
@@ -88,8 +97,9 @@ type ConfirmAction =
       tone: "danger";
     }
   | {
-      type: "resendInvite";
+      type: "activateInvite";
       inviteId: string;
+      email: string;
       role: EventStaffRole;
       title: string;
       description: string;
@@ -126,10 +136,25 @@ export default function StaffManagementPage() {
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [cancelInviteId, setCancelInviteId] = useState<string | null>(null);
-  const [resendingInviteId, setResendingInviteId] = useState<string | null>(null);
+  const [activatingInviteId, setActivatingInviteId] = useState<string | null>(null);
 
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
   const [confirmLoading, setConfirmLoading] = useState(false);
+
+  const [registerInviteId, setRegisterInviteId] = useState<string | null>(null);
+  const [registerEmail, setRegisterEmail] = useState("");
+  const [registerRole, setRegisterRole] = useState<EventStaffRole>("scanner");
+  const [registerFullName, setRegisterFullName] = useState("");
+  const [registerUsername, setRegisterUsername] = useState("");
+  const [registerPassword, setRegisterPassword] = useState("");
+  const [registerLoading, setRegisterLoading] = useState(false);
+
+  const [createdCredential, setCreatedCredential] = useState<{
+    email: string;
+    username: string;
+    password: string;
+  } | null>(null);
+  const [showCredentialDialog, setShowCredentialDialog] = useState(false);
 
   const isOwner = myGlobalRole === "owner";
   const isEventAdmin = myEventRole === "admin";
@@ -321,7 +346,12 @@ export default function StaffManagementPage() {
       setConfirmAction({
         type: "add",
         title: "Tambah / Invite Staff",
-        description: `Email: ${email}\nRole: ${newRole}\nEvent: ${eventName || eventId}`,
+        description:
+          `Email: ${email}\n` +
+          `Role: ${newRole}\n` +
+          `Event: ${eventName || eventId}\n\n` +
+          `Kalau email sudah punya akun, user langsung ditambahkan ke event.\n` +
+          `Kalau belum punya akun, email masuk ke pending.`,
         tone: "default",
       });
     } catch (e: any) {
@@ -341,32 +371,75 @@ export default function StaffManagementPage() {
     try {
       const email = emailInput.trim().toLowerCase();
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session?.access_token) {
-        throw new Error("Session tidak ditemukan. Silakan login ulang.");
+      if (!email || !email.includes("@")) {
+        throw new Error("Masukkan email yang valid.");
       }
 
-      const { data, error } = await supabase.functions.invoke("invite-event-staff", {
-        body: {
-          eventId,
-          email,
-          role: newRole,
-        },
-      });
-
-      if (error) {
-        throw new Error(
-          data?.error || error.message || "Edge Function returned a non-2xx status code"
-        );
-      }
-      if (data?.error) {
-        throw new Error(data.error);
+      if (!isOwner && newRole !== "scanner") {
+        throw new Error("Admin event hanya boleh menambahkan scanner.");
       }
 
-      toast.success(data?.message || "Berhasil.");
+      const { data: existingProfile, error: existingErr } = await supabase
+        .from("profiles")
+        .select("user_id, email")
+        .eq("email", email)
+        .maybeSingle();
+
+      if (existingErr) throw existingErr;
+
+      if (existingProfile?.user_id) {
+        const { error: staffErr } = await supabase
+          .from("event_staff")
+          .upsert(
+            {
+              event_id: eventId,
+              user_id: existingProfile.user_id,
+              role: newRole,
+            },
+            { onConflict: "event_id,user_id" }
+          );
+
+        if (staffErr) throw staffErr;
+
+        await supabase
+          .from("staff_invites")
+          .update({
+            status: "accepted",
+            accepted_at: new Date().toISOString(),
+          })
+          .eq("event_id", eventId)
+          .eq("email", email)
+          .eq("status", "pending");
+
+        toast.success("User sudah punya akun. Staff langsung ditambahkan.");
+      } else {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        const currentUserId = session?.user?.id;
+        if (!currentUserId) {
+          throw new Error("Session tidak ditemukan. Silakan login ulang.");
+        }
+
+        const { error: inviteErr } = await supabase
+          .from("staff_invites")
+          .upsert(
+            {
+              event_id: eventId,
+              email,
+              role: newRole,
+              invited_by: currentUserId,
+              status: "pending",
+            },
+            { onConflict: "event_id,email" }
+          );
+
+        if (inviteErr) throw inviteErr;
+
+        toast.success("Email belum punya akun. Disimpan sebagai pending.");
+      }
+
       setEmailInput("");
       setNewRole("scanner");
       setConfirmAction(null);
@@ -537,33 +610,121 @@ export default function StaffManagementPage() {
     }
   }
 
-  function resendInvite(inviteId: string, role: EventStaffRole) {
+  function activateInvite(inviteId: string, email: string, role: EventStaffRole) {
+    if (!eventId) return;
+
     try {
       if (!isOwner && role !== "scanner") {
-        throw new Error("Admin event hanya boleh resend invite scanner.");
+        throw new Error("Admin event hanya boleh mengaktifkan scanner.");
       }
 
       setConfirmAction({
-        type: "resendInvite",
+        type: "activateInvite",
         inviteId,
+        email,
         role,
-        title: "Kirim Ulang Invite",
-        description: "Invite akan dikirim ulang ke email staff. Lanjutkan?",
+        title: "Aktifkan Invite",
+        description: `Sistem akan cek apakah ${email} sudah punya akun. Kalau sudah, user akan langsung ditambahkan sebagai ${role}.`,
         tone: "default",
       });
     } catch (e: any) {
-      const msg = e?.message ?? "Failed to prepare resend invite";
+      const msg = e?.message ?? "Failed to prepare activate invite";
       setErr(msg);
       toast.error(msg);
     }
   }
 
-  async function doResendInvite(inviteId: string) {
-    setResendingInviteId(inviteId);
+  async function doActivateInvite(inviteId: string, email: string, role: EventStaffRole) {
+    if (!eventId) return;
+
+    setActivatingInviteId(inviteId);
     setConfirmLoading(true);
     setErr(null);
 
     try {
+      const normalizedEmail = email.trim().toLowerCase();
+
+      const { data: profile, error: profileErr } = await supabase
+        .from("profiles")
+        .select("user_id")
+        .eq("email", normalizedEmail)
+        .maybeSingle();
+
+      if (profileErr) throw profileErr;
+
+      if (!profile?.user_id) {
+        throw new Error("User belum punya akun.");
+      }
+
+      const { error: staffErr } = await supabase
+        .from("event_staff")
+        .upsert(
+          {
+            event_id: eventId,
+            user_id: profile.user_id,
+            role,
+          },
+          { onConflict: "event_id,user_id" }
+        );
+
+      if (staffErr) throw staffErr;
+
+      const { error: inviteErr } = await supabase
+        .from("staff_invites")
+        .update({
+          status: "accepted",
+          accepted_at: new Date().toISOString(),
+        })
+        .eq("id", inviteId)
+        .eq("event_id", eventId);
+
+      if (inviteErr) throw inviteErr;
+
+      toast.success("Pending invite berhasil diaktifkan.");
+      setConfirmAction(null);
+      await load();
+    } catch (e: any) {
+      const msg = e?.message ?? "Failed to activate invite";
+      setErr(msg);
+      toast.error(msg);
+    } finally {
+      setActivatingInviteId(null);
+      setConfirmLoading(false);
+    }
+  }
+
+  function openRegisterUserDialog(invite: StaffInviteRow) {
+    setRegisterInviteId(invite.id);
+    setRegisterEmail(invite.email);
+    setRegisterRole(invite.role);
+    setRegisterFullName("");
+    setRegisterUsername("");
+    setRegisterPassword("");
+  }
+
+  async function submitRegisterUser() {
+    if (!eventId || !registerInviteId) return;
+
+    setRegisterLoading(true);
+    setErr(null);
+
+    try {
+      if (!registerFullName.trim()) {
+        throw new Error("Nama wajib diisi.");
+      }
+
+      if (!registerUsername.trim()) {
+        throw new Error("Username wajib diisi.");
+      }
+
+      if (registerUsername.includes("@")) {
+        throw new Error("Username tidak boleh berbentuk email.");
+      }
+
+      if (registerPassword.trim().length < 6) {
+        throw new Error("Password minimal 6 karakter.");
+      }
+
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -572,29 +733,72 @@ export default function StaffManagementPage() {
         throw new Error("Session tidak ditemukan. Silakan login ulang.");
       }
 
-      const { data, error } = await supabase.functions.invoke("resend-event-staff-invite", {
-        body: { inviteId },
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
+      console.log("SESSION:", session);
+      console.log("ACCESS TOKEN:", session?.access_token);
+      console.log("REGISTER DATA:", {
+        inviteId: registerInviteId,
+        eventId,
+        email: registerEmail,
       });
 
-      if (error) {
-        throw new Error(error.message || "Edge Function returned a non-2xx status code");
-      }
-      if (data?.error) {
-        throw new Error(data.error);
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+      console.log("AUTH HEADER:", `Bearer ${session.access_token}`);
+
+      const res = await fetch(
+        `${supabaseUrl}/functions/v1/create-event-staff-account`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: supabaseAnonKey,
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            inviteId: registerInviteId,
+            eventId,
+            email: registerEmail,
+            role: registerRole,
+            fullName: registerFullName.trim(),
+            username: registerUsername.trim().toLowerCase(),
+            password: registerPassword.trim(),
+          }),
+        }
+      );
+
+      const data = await res.json();
+
+      console.log("RESPONSE STATUS:", res.status);
+      console.log("RESPONSE DATA:", data);
+      console.log("create-event-staff-account status:", res.status);
+      console.log("create-event-staff-account response:", data);
+
+      if (!res.ok) {
+        throw new Error(data?.error || `Gagal mendaftarkan user. HTTP ${res.status}`);
       }
 
-      toast.success(data?.message || "Invite berhasil dikirim ulang.");
-      setConfirmAction(null);
+      if (data?.credentials) {
+        setCreatedCredential(data.credentials);
+        setShowCredentialDialog(true);
+      }
+
+      toast.success(data?.message || "User berhasil didaftarkan.");
+
+      setRegisterInviteId(null);
+      setRegisterEmail("");
+      setRegisterRole("scanner");
+      setRegisterFullName("");
+      setRegisterUsername("");
+      setRegisterPassword("");
+
+      await load();
     } catch (e: any) {
-      const msg = e?.message ?? "Unexpected error";
+      const msg = e?.message ?? "Gagal mendaftarkan user";
       setErr(msg);
-      toast.error("Gagal mengirim invite ulang: " + msg);
+      toast.error(msg);
     } finally {
-      setResendingInviteId(null);
-      setConfirmLoading(false);
+      setRegisterLoading(false);
     }
   }
 
@@ -611,8 +815,12 @@ export default function StaffManagementPage() {
       case "cancelInvite":
         await doCancelInvite(confirmAction.inviteId);
         break;
-      case "resendInvite":
-        await doResendInvite(confirmAction.inviteId);
+      case "activateInvite":
+        await doActivateInvite(
+          confirmAction.inviteId,
+          confirmAction.email,
+          confirmAction.role
+        );
         break;
       case "updateRole":
         await doUpdateStaffRole(confirmAction.userId, confirmAction.role);
@@ -716,7 +924,7 @@ export default function StaffManagementPage() {
               <Input
                 value={emailInput}
                 onChange={(e) => setEmailInput(e.target.value)}
-                placeholder="Kalau email sudah punya akun, staff langsung ditambahkan. Kalau belum, sistem kirim invite."
+                placeholder="staff@email.com"
               />
             </div>
 
@@ -745,6 +953,10 @@ export default function StaffManagementPage() {
               {adding ? "Processing..." : "Add / Invite"}
             </Button>
           </div>
+
+          <p className="mt-3 text-xs text-gray-500">
+            Kalau email sudah punya akun, staff langsung ditambahkan. Kalau belum, email masuk ke pending.
+          </p>
         </CardContent>
       </Card>
 
@@ -923,12 +1135,22 @@ export default function StaffManagementPage() {
                           <Button
                             size="sm"
                             variant="outline"
-                            disabled={
-                              resendingInviteId === inv.id || (!isOwner && inv.role !== "scanner")
-                            }
-                            onClick={() => resendInvite(inv.id, inv.role)}
+                            onClick={() => openRegisterUserDialog(inv)}
                           >
-                            {resendingInviteId === inv.id ? "Sending..." : "Resend"}
+                            <UserRoundPlus className="w-4 h-4 mr-2" />
+                            Buat Akun
+                          </Button>
+
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={
+                              activatingInviteId === inv.id || (!isOwner && inv.role !== "scanner")
+                            }
+                            onClick={() => activateInvite(inv.id, inv.email, inv.role)}
+                          >
+                            <CheckCircle2 className="w-4 h-4 mr-2" />
+                            {activatingInviteId === inv.id ? "Activating..." : "Aktifkan"}
                           </Button>
 
                           <Button
@@ -1000,6 +1222,111 @@ export default function StaffManagementPage() {
                 : isDangerAction
                 ? "Ya, lanjutkan"
                 : "Lanjutkan"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!registerInviteId}
+        onOpenChange={(open) => {
+          if (!open && !registerLoading) {
+            setRegisterInviteId(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-[#0F1C2E]">
+              Buat Akun User Baru
+            </AlertDialogTitle>
+            <AlertDialogDescription className="whitespace-pre-line">
+              Buat akun untuk email: {registerEmail}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="space-y-3">
+            <div>
+              <label className="text-sm text-gray-700">Nama</label>
+              <Input
+                value={registerFullName}
+                onChange={(e) => setRegisterFullName(e.target.value)}
+                placeholder="Nama lengkap"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm text-gray-700">Username</label>
+              <Input
+                value={registerUsername}
+                onChange={(e) => setRegisterUsername(e.target.value)}
+                placeholder="username login"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm text-gray-700">Password</label>
+              <Input
+                type="text"
+                value={registerPassword}
+                onChange={(e) => setRegisterPassword(e.target.value)}
+                placeholder="password awal"
+              />
+            </div>
+
+            <div className="text-xs text-gray-500">
+              Role event: <b>{registerRole}</b>
+            </div>
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={registerLoading}>
+              Batal
+            </AlertDialogCancel>
+
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                submitRegisterUser();
+              }}
+              disabled={registerLoading}
+              className="bg-[#0F1C2E] hover:bg-[#0F1C2E]/90 text-white"
+            >
+              {registerLoading ? "Memproses..." : "Daftarkan"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showCredentialDialog} onOpenChange={setShowCredentialDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-[#0F1C2E]">
+              Akun Staff Berhasil Dibuat
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Simpan credential ini dan bagikan ke staff.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="space-y-2 rounded-md border bg-[#F8FAFC] p-4 text-sm">
+            <div>
+              <span className="font-semibold">Email:</span> {createdCredential?.email ?? "—"}
+            </div>
+            <div>
+              <span className="font-semibold">Username:</span> {createdCredential?.username ?? "—"}
+            </div>
+            <div>
+              <span className="font-semibold">Password:</span> {createdCredential?.password ?? "—"}
+            </div>
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogAction
+              onClick={() => setShowCredentialDialog(false)}
+              className="bg-[#0F1C2E] hover:bg-[#0F1C2E]/90 text-white"
+            >
+              Tutup
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

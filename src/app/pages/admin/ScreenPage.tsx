@@ -86,6 +86,9 @@ export default function ScreenPage() {
   const wakeLockRef = useRef<any>(null);
 
   const title = useMemo(() => event?.name ?? "Live Check-in", [event?.name]);
+  const [displayCount, setDisplayCount] = useState(0);
+  const [highlightIndex, setHighlightIndex] = useState(0);
+  const featuredGuest = recent[highlightIndex] ?? latestGuest;
 
   async function loadEvent() {
     if (!eventId) return;
@@ -159,6 +162,10 @@ export default function ScreenPage() {
   }
 
   useEffect(() => {
+    setHighlightIndex(0);
+  }, [recent.length, latestGuest?.id]);
+
+  useEffect(() => {
     setError(null);
     loadEvent();
     loadCount();
@@ -169,6 +176,31 @@ export default function ScreenPage() {
   useEffect(() => {
     document.title = `${title} • Invitara Live`;
   }, [title]);
+
+  useEffect(() => {
+    let frame = 0;
+    const start = displayCount;
+    const end = checkedCount;
+    const duration = 500;
+    const steps = 20;
+
+    if (start === end) return;
+
+    const diff = end - start;
+    const tick = window.setInterval(() => {
+      frame += 1;
+      const progress = frame / steps;
+      const value = Math.round(start + diff * progress);
+      setDisplayCount(value);
+
+      if (frame >= steps) {
+        setDisplayCount(end);
+        window.clearInterval(tick);
+      }
+    }, duration / steps);
+
+    return () => window.clearInterval(tick);
+  }, [checkedCount]);
 
   // realtime UPDATE + INSERT
   useEffect(() => {
@@ -222,6 +254,16 @@ export default function ScreenPage() {
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
+
+  useEffect(() => {
+    if (recent.length <= 1) return;
+
+    const t = window.setInterval(() => {
+      setHighlightIndex((prev) => (prev + 1) % recent.length);
+    }, 3000);
+
+    return () => window.clearInterval(t);
+  }, [recent]);
 
   // fullscreen state
   useEffect(() => {
@@ -293,7 +335,13 @@ export default function ScreenPage() {
   }
 
   return (
-    <div className="h-screen overflow-hidden bg-[#0B1220] text-white">
+      <div
+        className="h-screen overflow-hidden text-white"
+        style={{
+          background:
+            "radial-gradient(circle at 20% 20%, rgba(31,41,55,0.85) 0%, rgba(31,41,55,0.35) 18%, rgba(11,18,32,0) 42%), linear-gradient(180deg, #0F172A 0%, #0B1220 45%, #08101C 100%)",
+        }}
+      >
       {/* Header */}
       <div className="px-10 pt-15 pb-6 flex items-start justify-between gap-6">
         <div className="flex items-start gap-4">
@@ -309,7 +357,7 @@ export default function ScreenPage() {
 
           <div>
             <div className="text-sm text-white/70">INVITARA • LIVE</div>
-            <div className="text-4xl font-semibold mt-1">{title}</div>
+            <div className="text-3xl font-semibold mt-1 line-clamp-2">{title}</div>
             <div className="text-white/70 mt-2">
               {event?.location ?? "—"}
               {event?.event_date ? (
@@ -330,8 +378,14 @@ export default function ScreenPage() {
 
         <div className="text-right flex flex-col items-end gap-4">
           <div>
-            <div className="text-sm text-white/70">Total Check-in</div>
-            <div className="text-6xl font-bold tracking-tight">{checkedCount}</div>
+            <div className="text-sm text-white/70">Total:</div>
+            <div
+              className={`text-6xl font-bold tracking-tight transition-all duration-300 ${
+                flash ? "scale-110 text-emerald-300" : "scale-100"
+              }`}
+            >
+              {displayCount}
+            </div>
           </div>
 
           {/* Fullscreen icon */}
@@ -356,39 +410,41 @@ export default function ScreenPage() {
               flash ? "border-emerald-300/60 shadow-[0_0_40px_rgba(16,185,129,0.25)]" : "border-white/10",
             ].join(" ")}
           >
-            {latestGuest ? (
-              <div className="w-full flex items-center gap-10">
+            {featuredGuest ? (
+              <div className={`w-full flex items-center gap-10 transition-all duration-500
+                  ${flash ? "scale-[1.015]" : "scale-100"}
+                `}>
                 <div className="shrink-0">
-                  {canShowPhoto(latestGuest) ? (
+                  {canShowPhoto(featuredGuest) ? (
                     <img
-                      src={latestGuest.photo_url!}
-                      alt={latestGuest.full_name}
+                      src={featuredGuest.photo_url!}
+                      alt={featuredGuest.full_name}
                       className="w-70 h-70 rounded-3xl object-cover border border-white/15"
-                      onError={() => brokenPhotoIds.current.add(latestGuest.id)}
+                      onError={() => brokenPhotoIds.current.add(featuredGuest.id)}
                     />
                   ) : (
                     <div className="w-70 h-70 rounded-3xl bg-white/10 border border-white/15 flex items-center justify-center text-6xl font-bold">
-                      {initials(latestGuest.full_name)}
+                      {initials(featuredGuest.full_name)}
                     </div>
                   )}
                 </div>
 
                 <div className="flex-1">
                   <div className="text-white/70 text-sm">SELAMAT DATANG</div>
-                  <div className="text-6xl font-extrabold leading-[1.05] mt-2">
-                    {latestGuest.full_name}
+                  <div className="text-6xl font-extrabold leading-[1.05] mt-2 line-clamp-2">
+                    {featuredGuest.full_name}
                   </div>
                   <div className="text-2xl text-white/80 mt-4">
-                    {latestGuest.organization ?? "—"}
+                    {featuredGuest.organization ?? "—"}
                   </div>
 
                   <div className="mt-8 flex items-center gap-4 text-white/80">
                     <div className="px-4 py-2 rounded-xl bg-white/10 border border-white/10">
                       Check-in:{" "}
-                      <span className="font-semibold">{fmtTime(latestGuest.checkin_time)}</span>
+                      <span className="font-semibold">{fmtTime(featuredGuest.checkin_time)}</span>
                     </div>
                     <div className="px-4 py-2 rounded-xl bg-white/10 border border-white/10 font-mono">
-                      {latestGuest.unique_code}
+                      {featuredGuest.unique_code}
                     </div>
                   </div>
 
@@ -405,6 +461,7 @@ export default function ScreenPage() {
             ) : (
               <div className="w-full text-center text-white/70">
                 <div className="text-2xl font-semibold">Menunggu check-in pertama…</div>
+                <div className="mt-6 opacity-30 text-6xl">👥</div>
                 <div className="text-sm mt-2">
                   Begitu scanner sukses, profil tamu akan tampil di sini.
                 </div>
@@ -425,13 +482,29 @@ export default function ScreenPage() {
               {recent.length === 0 ? (
                 <div className="text-white/60 text-sm">Belum ada check-in.</div>
               ) : (
-                recent.map((g) => (
-                  <div
-                    key={g.id}
-                    className="rounded-2xl bg-white/5 border border-white/10 p-4 flex items-center gap-4"
-                  >
-                    <div className="w-12 h-12 rounded-xl bg-white/10 border border-white/10 flex items-center justify-center font-bold">
-                      {initials(g.full_name)}
+                  recent.map((g, i) => (
+                    <div
+                      key={g.id}
+                      className={[
+                        "rounded-2xl p-4 flex items-center gap-4 border transition-all duration-300",
+                        i === 0
+                          ? "bg-emerald-500/10 border-emerald-400/30 shadow-[0_0_20px_rgba(16,185,129,0.12)]"
+                          : "bg-white/5 border-white/10",
+                      ].join(" ")}
+                    >
+                    <div className="shrink-0">
+                      {canShowPhoto(g) ? (
+                        <img
+                          src={g.photo_url!}
+                          alt={g.full_name}
+                          className="w-12 h-12 rounded-xl object-cover border border-white/10"
+                          onError={() => brokenPhotoIds.current.add(g.id)}
+                        />
+                      ) : (
+                        <div className="w-12 h-12 rounded-xl bg-white/10 border border-white/10 flex items-center justify-center font-bold">
+                          {initials(g.full_name)}
+                        </div>
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold truncate">{g.full_name}</div>

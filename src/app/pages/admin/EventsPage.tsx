@@ -95,29 +95,38 @@ export default function EventsPage() {
     setEventCode(code || "");
   }, [autoSlugPreview]);
 
-  const [role, setRole] = useState<GlobalRole>("staff");
+  const [role, setRole] = useState<GlobalRole | null>(null);
 
-  useEffect(() => {
+ useEffect(() => {
     (async () => {
-      const { data: sess } = await supabase.auth.getSession();
-      const uid = sess.session?.user?.id;
-      if (!uid) return;
+      try {
+        const { data: sess } = await supabase.auth.getSession();
+        const uid = sess.session?.user?.id;
+        if (!uid) {
+          setRole("staff");
+          return;
+        }
 
-      const { data: prof } = await supabase
-        .from("profiles")
-        .select("role, role_global")
-        .eq("user_id", uid)
-        .maybeSingle();
+        const { data: prof } = await supabase
+          .from("profiles")
+          .select("role, role_global")
+          .eq("user_id", uid)
+          .maybeSingle();
 
-      setRole(
-        prof?.role_global === "owner" || prof?.role === "owner"
-          ? "owner"
-          : "staff"
-      );
+        setRole(
+          prof?.role_global === "owner" || prof?.role === "owner"
+            ? "owner"
+            : "staff"
+        );
+      } catch {
+        setRole("staff");
+      }
     })();
   }, []);
 
   async function refresh() {
+    if (!role) return;
+
     setLoading(true);
     setErr(null);
 
@@ -127,7 +136,6 @@ export default function EventsPage() {
 
       if (!uid) throw new Error("Not logged in");
 
-      // owner → semua event
       if (role === "owner") {
         const { data, error } = await supabase
           .from("events")
@@ -140,7 +148,6 @@ export default function EventsPage() {
         return;
       }
 
-      // staff → hanya event yg dia punya akses
       const { data, error } = await supabase
         .from("event_staff")
         .select(`
@@ -163,8 +170,9 @@ export default function EventsPage() {
   }
 
   useEffect(() => {
+    if (!role) return;
     refresh();
-  }, []);
+  }, [role]);
 
   async function onCreate() {
     setSubmitting(true);
@@ -271,7 +279,9 @@ export default function EventsPage() {
         <div>
           <h1 className="text-2xl font-semibold">Events</h1>
           <p className="text-sm text-muted-foreground">
-            {role === "owner"
+            {role === null
+              ? "Loading role..."
+              : role === "owner"
               ? "Create and manage events."
               : "Daftar event yang bisa kamu akses."}
           </p>
