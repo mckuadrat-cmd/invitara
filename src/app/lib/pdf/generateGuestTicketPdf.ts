@@ -1,6 +1,8 @@
 import jsPDF from "jspdf";
 import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
+import { title } from "process";
+import { time } from "console";
 
 type GuestRow = {
   id: string;
@@ -12,6 +14,7 @@ type GuestRow = {
   organization: string | null;
   dept_class: string | null;
   unique_code: string;
+  guest_type?: "regular" | "vip";
   status: "registered" | "confirmed" | "checked_in";
   checkin_time: string | null;
 };
@@ -129,7 +132,22 @@ function formatTimeOnly(iso: string | null) {
       new Date(iso).toLocaleTimeString("id-ID", {
         hour: "2-digit",
         minute: "2-digit",
-      }) + " WIB"
+      })
+    );
+  } catch {
+    return "Waktu menyusul";
+  }
+}
+
+function formatTimeEnd(iso: string | null) {
+  if (!iso) return "Waktu menyusul";
+  try {
+    return (
+      new Date(iso).toLocaleTimeString("id-ID", {
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZoneName: "short",
+      })
     );
   } catch {
     return "Waktu menyusul";
@@ -328,7 +346,7 @@ function drawInfoCard(
       index === separatorAfterLine &&
       index < visibleLines.length - 1
     ) {
-      const lineY = yy + 3;
+      const lineY = yy + 4;
 
       const separatorColor = config.separatorColor ?? {
         r: 200,
@@ -346,7 +364,7 @@ function drawInfoCard(
       doc.line(x + 15, lineY, x + w - 15, lineY);
 
       // kasih jarak ekstra setelah separator
-      yy += 2;
+      yy += 4;
     }
 
     yy += lineHeight;
@@ -482,23 +500,52 @@ export async function generateGuestTicketPdf({
   const colors = theme.colors ?? {};
   const locationData = theme.locationData ?? {};
 
+  const isVIP = guest.guest_type === "vip";
+  const vipAccentHex =
+    theme?.vip?.badgeColor ??
+    "#D6C6A5";
+
+  const vipAccent = hexToRgb(vipAccentHex, { r: 214, g: 198, b: 165 });
+  const vipPrimary = hexToRgb(theme?.vip?.backColor ?? "#614C21", { r: 97, g: 76, b: 33 });
+
   const logoUrl = brand.logoUrl ?? brand.logo ?? null;
 
   // ===== COLOR SYSTEM FULL DYNAMIC =====
-  const pageBg = hexToRgb(colors.pageBg ?? colors.backgroundColor ?? "#F4F4F4");
-  const stripColor = hexToRgb(colors.stripColor ?? brand.primary ?? "#1F234D");
-  const ticketColor = hexToRgb(colors.ticketColor ?? brand.accent ?? "#232323");
-  const cardBg = hexToRgb(colors.boxColor ?? "#F9F9F9");
-  const cardBorder = hexToRgb(colors.boxBorderColor ?? "#E7E7E7");
-  const iconColor = hexToRgb(colors.iconColor ?? colors.accent ?? "#000000");
-  const titleColor = hexToRgb(colors.boxTitleColor ?? "#000000");
-  const bodyColor = hexToRgb(colors.boxBodyColor ?? "#232323");
-  const cutColor = hexToRgb(colors.cutColor ?? "#000000");
-  const ticketTextColor = hexToRgb(colors.ticketTextColor ?? "#FFFFFF");
-  const qrPanelColor = hexToRgb(colors.qrPanelColor ?? colors.pageBg ?? "#F4F4F4");
-  const rightNotchColor = pageBg;
-  const white = { r: 255, g: 255, b: 255 };
-  const black = { r: 0, g: 0, b: 0 };
+  const pageBg = isVIP
+    ? hexToRgb("#FFFBF2")
+    : hexToRgb(colors.pageBg ?? colors.backgroundColor ?? "#F4F4F4");
+
+  const stripColor = isVIP
+    ? hexToRgb("#111111")
+    : hexToRgb(colors.stripColor ?? brand.primary ?? "#1F234D");
+
+  const ticketColor = isVIP
+    ? hexToRgb("#614C21")
+    : hexToRgb(colors.ticketColor ?? brand.accent ?? "#232323");
+
+  const cardBg = isVIP
+    ? hexToRgb("#161616")
+    : hexToRgb(colors.boxColor ?? "#F9F9F9");
+
+  const iconColor = isVIP
+    ? vipAccent
+    : hexToRgb(colors.iconColor ?? colors.accent ?? "#000000");
+
+  const titleColor = isVIP
+    ? vipPrimary
+    : hexToRgb(colors.boxTitleColor ?? "#141414");
+
+  const bodyColor = isVIP
+    ? hexToRgb("#FFFBF2")
+    : hexToRgb(colors.boxBodyColor ?? "#232323");
+
+  const cutColor = isVIP
+    ? vipAccent
+    : hexToRgb(colors.cutColor ?? "#000000");
+
+  const ticketTextColor = isVIP
+    ? hexToRgb("#FFFBF2")
+    : hexToRgb(colors.ticketTextColor ?? "#141414");
 
   // ===== DATA =====
   const codeText = safeText(guest.unique_code, "-");
@@ -507,6 +554,7 @@ export async function generateGuestTicketPdf({
   const guestOrg = safeText(guest.organization, "Sekolah Pesat");
   const deptClass = safeText(guest.dept_class, "-");
   const taglineText = safeText(theme.tagline ?? event.name, event.name).toUpperCase();
+  const headlineText = safeText(theme.headline ?? event.name, event.name).toUpperCase();
 
   const greetingTitle = safeText(theme.greetingTitle, "Kepada Yth.");
   const guestGreeting = safeText(theme.guestGreeting, "Orang Tua/ Wali Murid");
@@ -524,11 +572,20 @@ export async function generateGuestTicketPdf({
       theme.headline ?? event.name,
       event.name
     )}” kami mengundang orang tua/wali murid kelas 12 untuk menghadiri acara tersebut yang akan diselenggarakan pada :`;
+  
+  const effectiveGuestGreeting = isVIP
+    ? theme.guestGreetingVip ?? "VIP Guest"
+    : guestGreeting;
+
+  const effectiveAbout = isVIP
+    ? theme.aboutVip ??
+      "Dengan hormat, kami mengundang Bapak/Ibu untuk menghadiri acara kami sebagai tamu VIP dengan informasi acara sebagai berikut:"
+    : paragraphText;  
 
   const eventDateLong = formatDateOnly(event.event_date);
   const eventDateSimple = formatDateSimple(event.event_date);
   const eventTime = formatTimeOnly(event.event_date);
-  const endTime = formatTimeOnly(theme.eventEndDate ?? null);
+  const endTime = formatTimeEnd(theme.eventEndDate ?? null);
 
   const qrPayload = await buildQrPayload();
   const qrData = await QRCode.toDataURL(qrPayload, {
@@ -585,16 +642,14 @@ export async function generateGuestTicketPdf({
   );
 
   doc.setFont("helvetica", "bold");
-  doc.setTextColor(lighten(bodyColor, 0.4).r, lighten(bodyColor, 0.4).g, lighten(bodyColor, 0.4).b);
+  doc.setTextColor(lighten(titleColor, 0.4).r, lighten(titleColor, 0.4).g, lighten(titleColor, 0.4).b);
   doc.setFontSize(21);
   doc.text(codeText, topCodeX, topCodeY);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(14);  
-  doc.text("E-TICKET", topCodeX, topCodeY + 10);
+  doc.text(isVIP ? "VIP PASS" : "E-TICKET", topCodeX, topCodeY + 10);  
   
-  doc.setTextColor(20, 20, 20);
-
   if (logoUrl) {
     try {
       await drawLogoContain(doc, logoUrl, logoX, logoY, logoW, logoH);
@@ -608,25 +663,25 @@ export async function generateGuestTicketPdf({
   let y = introY;
 
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(12.5);
+  doc.setTextColor(titleColor.r, titleColor.g, titleColor.b);
+  doc.setFontSize(11);
   doc.text(greetingTitle, introX, y);
-  doc.setTextColor(lighten(bodyColor, 0.4).r, lighten(bodyColor, 0.4).g, lighten(bodyColor, 0.4).b);
 
   y += 6.5;
-  doc.setFontSize(10);
-  doc.text(guestGreeting, introX, y);
-  doc.setTextColor(20, 20, 20);
+  doc.setFontSize(10);  
+  doc.setTextColor(lighten(titleColor, 0.4).r, lighten(titleColor, 0.4).g, lighten(titleColor, 0.4).b);
+  doc.text(effectiveGuestGreeting, introX, y);
 
   y += 11;
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(14);
+  doc.setFont("helvetica", "bold");  
+  doc.setTextColor(titleColor.r, titleColor.g, titleColor.b);
+  doc.setFontSize(18);
   doc.text(guestName.toUpperCase(), introX, y);
-  doc.setTextColor(lighten(bodyColor, 0.4).r, lighten(bodyColor, 0.4).g, lighten(bodyColor, 0.4).b);
 
   y += 7.5;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10.5);
-  doc.setTextColor(20, 20, 20);
+  doc.setFont("helvetica", "normal");  
+  doc.setTextColor(lighten(titleColor, 0.4).r, lighten(titleColor, 0.4).g, lighten(titleColor, 0.4).b);
+  doc.setFontSize(10);
 
   const iconSize = 8;
   const iconGap = 12;
@@ -646,7 +701,8 @@ export async function generateGuestTicketPdf({
   // geser ke kanan + spacing
   currentX += orgWidth + 6;
 
-  doc.setFontSize(10.5);
+  doc.setFontSize(10);  
+  doc.setTextColor(lighten(titleColor, 0.4).r, lighten(titleColor, 0.4).g, lighten(titleColor, 0.4).b);
 
   currentX += 6;
 
@@ -671,15 +727,14 @@ export async function generateGuestTicketPdf({
   }
 
   y += 16;
-  doc.setFontSize(12.5);
-  doc.text(salamText, introX, y);  
-  doc.setTextColor(20, 20, 20);
+  doc.setFontSize(11);  
+  doc.setTextColor(titleColor.r, titleColor.g, titleColor.b);
+  doc.text(salamText, introX, y);
 
   y += 8;
-  doc.setFontSize(12.5);
-  doc.setTextColor(20, 20, 20);
-
-  const introLines = splitText(doc, paragraphText, introW);
+  doc.setFontSize(11);
+  doc.setTextColor(titleColor.r, titleColor.g, titleColor.b);
+  const introLines = splitText(doc, effectiveAbout, introW);
   for (const line of introLines.slice(0, 5)) {
     doc.text(line, introX, y);
     y += 5.4;
@@ -692,7 +747,7 @@ export async function generateGuestTicketPdf({
   doc.rect(0, stripY, pageW, stripH, "F");
 
   // ===== CARD SYSTEM PROPORSIONAL =====
-  const cardOuterX = 8;
+  const cardOuterX = 7;
   const cardGap = 4;
   const totalWidth = pageW - cardOuterX * 2;
   const cardW = (totalWidth - cardGap * 3) / 4;
@@ -830,41 +885,89 @@ export async function generateGuestTicketPdf({
   doc.addImage(qrData, "PNG", qrX, qrY, qrSize, qrSize);
 
   // text ticket
-  let tx = seamX + 14;
-  let ty = ticketY + 12;
+  const tx = seamX + 14;
+
+  const barcodeY = ticketY + 12;
+  const priorityY = barcodeY + 16;
+  const identityY = isVIP ? barcodeY + 24 : barcodeY + 18;
+  const nameY = identityY + 12;
 
   // barcode
   const barcodeW = 52;
   const barcodeH = 10;
-  doc.addImage(barcodeData, "PNG", tx, ty, barcodeW, barcodeH);
+  doc.setFillColor(255, 255, 255);
+  doc.rect(tx - 2, barcodeY - 1, barcodeW + 4, barcodeH + 2, "F");
+  doc.addImage(barcodeData, "PNG", tx, barcodeY, barcodeW, barcodeH);
 
-  // id text di bawah barcode
-  ty += 18;
-
-  doc.setTextColor(ticketTextColor.r, ticketTextColor.g, ticketTextColor.b);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(15);
-  doc.text(identityNo, tx, ty);
-
-  // nama
-  ty += 12;
-  doc.setFillColor(lighten(ticketColor, 0.3).r, lighten(ticketColor, 0.3).g, lighten(ticketColor, 0.3).b);
-  doc.rect(tx - 2, ty - 4, barcodeW, barcodeH - 4, "F");
-  doc.setFontSize(26);
-  const nameLines = splitText(doc, guestName.toUpperCase(), ticketW - 24);
-  for (const line of nameLines.slice(0, 3)) {
-    doc.text(line, tx, ty);
-    ty += 18;
+  if (isVIP) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(vipAccent.r, vipAccent.g, vipAccent.b);
+    doc.text("PRIORITY ACCESS", tx, priorityY);
   }
 
-  ty += 15;
-  doc.setFont("helvetica", "normal");
-  fitText(doc, taglineText, ticketW - 24, 8.8, 7);
-  doc.text(taglineText, tx, ty);
+  // identity
+  doc.setTextColor(ticketTextColor.r, ticketTextColor.g, ticketTextColor.b);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.text(identityNo, tx, identityY);
 
-  ty += 6;
-  fitText(doc, eventDateSimple, ticketW - 24, 13, 9);
-  doc.text(eventDateSimple, tx, ty);
+  // ===== NAMA =====
+  const nameBoxY = nameY - 4;
+  const nameBoxH = 9;
+  doc.setFillColor(
+    lighten(ticketColor, 0.4).r,
+    lighten(ticketColor, 0.4).g,
+    lighten(ticketColor, 0.4).b
+  );
+  doc.rect(tx - 2, nameBoxY, barcodeW, nameBoxH, "F");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(20);
+  doc.setTextColor(ticketTextColor.r, ticketTextColor.g, ticketTextColor.b);
+
+  const maxNameWidth = ticketW - 48;
+  const nameLines = splitText(doc, guestName.toUpperCase(), maxNameWidth).slice(0, 2);
+
+  // line height dibikin rapet
+  const nameLineHeight = 8;
+
+  // hitung tinggi block nama
+  const nameBlockHeight = nameLines.length * nameLineHeight;
+
+  // gambar nama
+  let currentNameY = nameY;
+  for (const line of nameLines) {
+    doc.text(line, tx, currentNameY);
+    currentNameY += nameLineHeight;
+  }
+
+  // ===== BADGE / HEADLINE / DATE =====
+  // posisi bawah jangan terlalu ikut panjang nama
+  const afterNameY = nameY + Math.max(nameBlockHeight, 14);
+
+  let vipBadgeY = afterNameY + 2;
+  let headlineY = isVIP ? vipBadgeY + 10 : afterNameY + 8;
+  let dateY = headlineY + 5;
+
+  if (isVIP) {
+    doc.setFillColor(vipAccent.r, vipAccent.g, vipAccent.b);
+    doc.roundedRect(tx - 2, vipBadgeY - 4, 36, 6, 2, 2, "F");
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(10, 10, 10);
+    doc.text("VIP GUEST", tx + 16, vipBadgeY, { align: "center" });
+  }
+
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(ticketTextColor.r, ticketTextColor.g, ticketTextColor.b);
+
+  fitText(doc, headlineText, ticketW - 24, 9, 9);
+  doc.text(headlineText, tx, headlineY);
+
+  fitText(doc, eventDateSimple, ticketW - 24, 9, 9);
+  doc.text(eventDateSimple, tx, dateY);
 
   if (autoDownload) {
     doc.save(`e-ticket-${guest.unique_code}-${guest.full_name.replace(/\s/g, '-')}.pdf`);

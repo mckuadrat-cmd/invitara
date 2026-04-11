@@ -32,6 +32,7 @@ type GuestRow = {
   organization: string | null;
   dept_class: string | null;
   unique_code: string;
+  guest_type?: "regular" | "vip";
   status: "registered" | "confirmed" | "checked_in";
   checkin_time: string | null;
 };
@@ -234,24 +235,35 @@ function buildGradientCss(
   gradient: any,
   fallbackPrimary: string,
   fallbackAccent: string,
-  alpha?: number
+  alpha?: number,
+  options?: {
+    overrideFirstStopColor?: string;
+  }
 ) {
   const type = gradient?.type === "radial" ? "radial" : "linear";
   const angle = Number(gradient?.angle ?? 135);
   const rawStops = Array.isArray(gradient?.stops) ? gradient.stops : [];
 
-  const stops: GradientStop[] =
+  let stops: GradientStop[] =
     rawStops.length >= 2
       ? rawStops
-        .map((s: any) => ({
-          color: String(s?.color ?? fallbackPrimary),
-          position: Number(s?.position ?? 0),
-        }))
-        .sort((a: any, b: any) => a.position - b.position)
+          .map((s: any) => ({
+            color: String(s?.color ?? fallbackPrimary),
+            position: Number(s?.position ?? 0),
+          }))
+          .sort((a: any, b: any) => a.position - b.position)
       : [
           { color: fallbackPrimary, position: 0 },
           { color: fallbackAccent, position: 100 },
         ];
+
+  if (options?.overrideFirstStopColor && stops.length > 0) {
+    stops = stops.map((stop, idx) =>
+      idx === 0
+        ? { ...stop, color: options.overrideFirstStopColor! }
+        : stop
+    );
+  }
 
   const stopText = stops
     .map((s) => {
@@ -397,13 +409,14 @@ function getFriendlyInvitationError(message?: string | null) {
 
 export default function GuestInvitationPage() {
   const { code } = useParams();
-  const guestCode = useMemo(() => String(code ?? "").trim().toUpperCase(), [code]);
+  const guestCode = useMemo(() => String(code ?? "").trim().toUpperCase(), [code]);  
+  const [guest, setGuest] = useState<GuestRow | null>(null);
+  const isVIP = guest?.guest_type === "vip";
 
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const [guest, setGuest] = useState<GuestRow | null>(null);
   const [event, setEvent] = useState<EventRow | null>(null);
   const [qrFormat, setQrFormat] = useState<string>("QR Code v1");
   const [qrDataUrl, setQrDataUrl] = useState("");
@@ -674,7 +687,25 @@ export default function GuestInvitationPage() {
         }
       : getAdaptiveTextColors(pageBaseColor);
 
-  const pageGradient = buildGradientCss(colors.gradient, primary, "#0B1220");
+  const vipBackColor =
+    (event as any)?.vip_back_color ||
+    event?.theme?.vip?.backColor ||
+    "#785206";
+
+  const vipBadgeColor =
+    (event as any)?.vip_badge_color ||
+    event?.theme?.vip?.badgeColor ||
+    "#D6C6A5";
+
+  const pageGradient = buildGradientCss(
+    colors.gradient,
+    primary,
+    "#0B1220",
+    undefined,
+    {
+      overrideFirstStopColor: isVIP ? vipBadgeColor : undefined,
+    }
+  );
 
   const cardColor =
     colors.cardColor ?? rgbaFromHex(cardColorHex, cardOpacity / 100);
@@ -702,14 +733,21 @@ export default function GuestInvitationPage() {
   const heroGradientCss = buildGradientCss(
     hero.gradient ?? colors.gradient,
     primary,
-    "#0B1220"
+    "#0B1220",
+    undefined,
+    {
+      overrideFirstStopColor: isVIP ? vipBackColor : undefined,
+    }
   );
 
   const heroBlendGradientCss = buildGradientCss(
     hero.gradient ?? colors.gradient,
     primary,
     "#0B1220",
-    0.34
+    0.34,
+    {
+      overrideFirstStopColor: isVIP ? vipBackColor : undefined,
+    }
   );
 
   const heroGlow = hero.glow ?? {};
@@ -787,6 +825,23 @@ export default function GuestInvitationPage() {
 
   const agenda: AgendaItem[] = Array.isArray(theme.agenda) ? theme.agenda : [];
   const faqs: Array<{ q: string; a: string }> = theme.faqs ?? [];
+
+  const effectivePrimary = isVIP ? vipBackColor : primary;
+  const effectiveAccent = isVIP ? vipBadgeColor : accent;
+  const effectiveTagline = isVIP ? "VIP INVITATION" : tagline;
+  const effectiveHeadline = isVIP ? `${headline}` : headline;
+  const effectiveGuestGreeting = isVIP
+    ? theme.guestGreetingVip ?? "VIP Guest"
+    : guestGreeting;
+
+  const effectiveAbout = isVIP
+    ? theme.aboutVip ??
+      "Dengan hormat, kami mengundang Bapak/Ibu untuk menghadiri acara kami sebagai tamu VIP dengan informasi acara sebagai berikut:"
+    : about;
+
+  const vipFacilities: string[] = Array.isArray(theme.vip?.facilities)
+    ? theme.vip.facilities
+    : [ "Priority Seat", "VIP Lounge", "Fast Track"];
 
   async function confirmAttendance() {
     try {
@@ -923,16 +978,16 @@ export default function GuestInvitationPage() {
     heroMode === "image-overlay" ||
     heroMode === "image-gradient-blend";
 
-  const contentBackground = isHeroImageMode ? pageGradient : primary;
+  const contentBackground = isHeroImageMode ? pageGradient : effectivePrimary;
 
   return (
-    <div
-      className="min-h-screen"
-      style={{
-        backgroundColor: primary,
-        color: adaptiveText.primary,
-      }}
-    >
+      <div
+        className="min-h-screen"
+        style={{
+          backgroundColor: effectivePrimary,
+          color: adaptiveText.primary,
+        }}
+      >
       <section
         className="relative overflow-hidden"
         style={{ minHeight: `max(${heroHeight}px, 70vh)` }}
@@ -948,11 +1003,11 @@ export default function GuestInvitationPage() {
         />
 
         <div className="relative max-w-6xl mx-auto px-6 pt-12 pb-16">
-          <div className="mt-16 grid lg:grid-cols-[1.2fr_0.8fr] gap-8 items-start">
+          <div className="mt-16 grid lg:grid-cols-[1.1fr_0.9fr] gap-8 items-start">
             <div>
               <div className="flex items-center gap-3 flex-wrap">
                 <div
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full border text-sm"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full border text-sm tracking-[0.18em] uppercase"
                   style={{
                     backgroundColor: cardColor,
                     borderColor: adaptiveText.border,
@@ -960,7 +1015,7 @@ export default function GuestInvitationPage() {
                   }}
                 >
                   <Sparkles className="w-4 h-4" />
-                  {tagline}
+                  {effectiveTagline}
                 </div>
 
                 <ThemedButton
@@ -999,20 +1054,53 @@ export default function GuestInvitationPage() {
                 style={{ color: adaptiveText.secondary }}
               >
                 <div className="flex items-center gap-2">
-                  <Calendar className="w-5 h-5" style={{ color: accent }} />
+                  <Calendar className="w-5 h-5" style={{ color: effectiveAccent }} />
                   {fmtDate(event.event_date)}
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Clock3 className="w-5 h-5" style={{ color: accent }} />
+                  <Clock3 className="w-5 h-5" style={{ color: effectiveAccent }} />
                   {fmtTimeRange(event.event_date, eventEndDate)}
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <MapPin className="w-5 h-5" style={{ color: accent }} />
+                  <MapPin className="w-5 h-5" style={{ color: effectiveAccent }} />
                   {venueName || venueAddress || "Lokasi menyusul"}
                 </div>
               </div>
+
+              
+                {isVIP && (
+                  <div
+                    className="mt-6 max-w-2xl rounded-2xl border p-5"
+                    style={{
+                      backgroundColor: cardColor,
+                      borderColor: adaptiveText.cardBorder,
+                    }}
+                  >
+                    <div
+                      className="text-sm uppercase tracking-[0.18em] mb-3"
+                      style={{ color: effectiveAccent }}
+                    >
+                      VIP Benefits
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-1">
+                      {vipFacilities.map((item, idx) => (
+                        <span
+                          key={idx}
+                          className="px-3 py-1 rounded-full text-xs"
+                          style={{
+                            backgroundColor: "rgba(255,255,255,0.15)",
+                            color: adaptiveText.secondary,
+                          }}
+                        >
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
               <div className="mt-8">
                 <div className="text-sm mb-3" style={{ color: adaptiveText.muted }}>
@@ -1055,9 +1143,9 @@ export default function GuestInvitationPage() {
               >
                 Kepada Yth.
                 <br />
-                {guestGreeting ? (
-                  <div className="text-base md:text-[13px]" style={{ color: adaptiveText.soft }}>
-                    {guestGreeting}
+                {effectiveGuestGreeting ? (
+                  <div className="text-base md:text-[13px]" style={{ color: isVIP ? vipBadgeColor : adaptiveText.soft }}>
+                    {effectiveGuestGreeting}
                   </div>
                 ) : null}
                 <span
@@ -1073,12 +1161,12 @@ export default function GuestInvitationPage() {
                   className="mt-3 inline-flex items-center gap-2"
                   style={{ color: adaptiveText.secondary }}
                 >
-                  <Building2 className="w-4 h-4" style={{ color: accent }} />
+                  <Building2 className="w-4 h-4" style={{ color: effectiveAccent }} />
                   {guest.organization}
                   {guest.dept_class && (
                     <>
                       {" "}
-                      • <BoxIcon className="w-4 h-4" style={{ color: accent }} />{" "}
+                      • <BoxIcon className="w-4 h-4" style={{ color: effectiveAccent }} />{" "}
                       {guest.dept_class}
                     </>
                   )}
@@ -1092,7 +1180,7 @@ export default function GuestInvitationPage() {
                 className="mt-2 max-w-2xl leading-relaxed"
                 style={{ color: adaptiveText.secondary }}
               >
-                {about}
+                {effectiveAbout}
               </p>
             </div>
 
@@ -1145,6 +1233,18 @@ export default function GuestInvitationPage() {
                     </a>
                   </ThemedButton>
                 ) : null}
+
+                {isVIP && (
+                  <div
+                    className="inline-flex items-center rounded-full px-4 py-2 text-xs font-semibold tracking-[0.18em] uppercase"
+                    style={{
+                      background: `linear-gradient(135deg, ${effectiveAccent}, rgba(255,255,255,0.18))`,
+                      color: "#111827",
+                    }}
+                   >
+                     VIP Access
+                  </div>
+                )}
               </div>
 
               <div
@@ -1153,7 +1253,7 @@ export default function GuestInvitationPage() {
                   background: `linear-gradient(135deg, ${rgbaFromHex(
                     primary,
                     0.88
-                  )}, ${rgbaFromHex(accent, 0.15)})`,
+                  )}, ${rgbaFromHex(effectiveAccent, 0.15)})`,
                   borderColor: adaptiveText.cardBorder,
                 }}
               >
@@ -1188,7 +1288,7 @@ export default function GuestInvitationPage() {
               <div className="p-5">
                 <div className="rounded-2xl bg-white p-3 flex justify-center">
                   {qrDataUrl ? (
-                    <img src={qrDataUrl} alt="QR Ticket" className="w-60 h-60" />
+                    <img src={qrDataUrl} alt="QR Ticket" className="w-80 h-80" />
                   ) : (
                     <div className="w-60 h-60 flex items-center justify-center text-black/60">
                       QR tidak tersedia
@@ -1200,11 +1300,11 @@ export default function GuestInvitationPage() {
                   className="mt-4 text-center text-xs"
                   style={{ color: adaptiveText.muted }}
                 >
-                  Tunjukkan QR ini saat registrasi
+                {isVIP ? "Tunjukkan QR ini di registrasi VIP" : "Tunjukkan QR ini saat registrasi"}
                 </div>
 
                 <div
-                  className="mt-4 rounded-2xl border p-4 flex items-center justify-between gap-3"
+                  className="mt-6 rounded-2xl border p-6 flex items-center justify-between gap-3"
                   style={{
                     backgroundColor: adaptiveText.cardSoft,
                     borderColor: adaptiveText.cardBorder,
@@ -1221,7 +1321,6 @@ export default function GuestInvitationPage() {
                       {guest.unique_code}
                     </div>
                   </div>
-
                   <ThemedButton
                     variant="outline"
                     className="rounded-xl"
@@ -1267,7 +1366,7 @@ export default function GuestInvitationPage() {
                 className="text-sm flex items-center gap-2"
                 style={{ color: adaptiveText.secondary }}
               >
-                <Info className="w-4 h-4" style={{ color: accent }} />
+                <Info className="w-4 h-4" style={{ color: effectiveAccent }} />
                 Acara
               </div>
               <div className="mt-2 font-semibold" style={{ color: adaptiveText.primary }}>
@@ -1286,7 +1385,7 @@ export default function GuestInvitationPage() {
                 className="text-sm flex items-center gap-2"
                 style={{ color: adaptiveText.secondary }}
               >
-                <Calendar className="w-4 h-4" style={{ color: accent }} />
+                <Calendar className="w-4 h-4" style={{ color: effectiveAccent }} />
                 Waktu Acara
               </div>
               <div className="mt-2 font-semibold" style={{ color: adaptiveText.primary }}>
@@ -1311,7 +1410,7 @@ export default function GuestInvitationPage() {
                 className="text-sm flex items-center gap-2"
                 style={{ color: adaptiveText.secondary }}
               >
-                <MapPin className="w-4 h-4" style={{ color: accent }} />
+                <MapPin className="w-4 h-4" style={{ color: effectiveAccent }} />
                 Lokasi
               </div>
               <div className="mt-2 font-semibold" style={{ color: adaptiveText.primary }}>
@@ -1333,7 +1432,7 @@ export default function GuestInvitationPage() {
                 className="text-sm flex items-center gap-2"
                 style={{ color: adaptiveText.secondary }}
               >
-                <Ticket className="w-4 h-4" style={{ color: accent }} />
+                <Ticket className="w-4 h-4" style={{ color: effectiveAccent }} />
                 Dresscode
               </div>
 
@@ -1355,7 +1454,7 @@ export default function GuestInvitationPage() {
           </div>
         </section>
 
-        {agenda.length > 0 ? (
+        {!isVIP && agenda.length > 0 ? (
           <section className="max-w-6xl mx-auto px-6 pt-12">
             <div className="flex items-center justify-between gap-4">
               <h2 className="text-2xl font-semibold" style={{ color: adaptiveText.primary }}>
@@ -1396,7 +1495,7 @@ export default function GuestInvitationPage() {
           </section>
         ) : null}
 
-        {faqs.length > 0 ? (
+        {!isVIP && faqs.length > 0 ? (
           <section className="max-w-6xl mx-auto px-6 pt-12">
             <h2 className="text-2xl font-semibold" style={{ color: adaptiveText.primary }}>
               Informasi Tambahan
@@ -1440,7 +1539,7 @@ export default function GuestInvitationPage() {
                 <img src={brand.logoUrl} alt="Logo" className="h-25" />
               ) : (
                 <span>
-                  <CheckCheck className="w-5 h-5" style={{ color: accent }} />
+                  <CheckCheck className="w-5 h-5" style={{ color: effectiveAccent }} />
                 </span>
               )}
             </div>

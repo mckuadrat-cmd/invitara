@@ -56,17 +56,20 @@ import { toast } from "sonner";
 
 type GuestStatus = "registered" | "confirmed" | "checked_in";
 
+type GuestType = "regular" | "vip";
+
 type GuestRow = {
   id: string;
   event_id: string;
-  identity_no: string | null;     // ✅ baru
+  identity_no: string | null;
   full_name: string;
   email: string | null;
   phone: string | null;
   organization: string | null;
-  dept_class: string | null;      // ✅ baru
+  dept_class: string | null;
   unique_code: string;
-  photo_url: string | null;     // ✅ baru
+  photo_url: string | null;
+  guest_type?: GuestType;
   status: GuestStatus;
   checkin_time: string | null;
   created_at: string;
@@ -207,6 +210,7 @@ export default function GuestListPage() {
     email: "",
     organization: "",
     dept_class: "",
+    guest_type: "regular" as GuestType,
     status: "confirmed" as GuestStatus,
     phoneCountry: "+62",
     phoneRaw: "",
@@ -492,8 +496,8 @@ export default function GuestListPage() {
         phone,
         organization: newGuest.organization.trim() || null,
         dept_class: newGuest.dept_class.trim() || null,
+        guest_type: newGuest.guest_type,
         status: newGuest.status,
-        // kalau DB lo sudah auto-generate unique_code via trigger, HAPUS ini.
         unique_code: makeCode(),
       };
 
@@ -507,6 +511,7 @@ export default function GuestListPage() {
         organization: "",
         dept_class: "",
         status: "confirmed",
+        guest_type: "regular",
         phoneCountry: "+62",
         phoneRaw: "",
       });
@@ -562,6 +567,9 @@ export default function GuestListPage() {
       unique_code:
         String(r.unique_code ?? "").trim().toUpperCase() || makeCode(),
       status: (String(r.status ?? "registered").trim() as any) || "registered",
+      guest_type: String(r.guest_type ?? "regular").trim().toLowerCase() === "vip"
+        ? "vip"
+        : "regular",
       photo_url: String(r.photo_url ?? "").trim() || null,
     }));
 
@@ -604,7 +612,8 @@ export default function GuestListPage() {
         (g.identity_no ?? "").toLowerCase().includes(q) ||
         (g.full_name ?? "").toLowerCase().includes(q) ||
         (g.organization ?? "").toLowerCase().includes(q) ||
-        (g.unique_code ?? "").toLowerCase().includes(q);
+        (g.unique_code ?? "").toLowerCase().includes(q) ||
+        (g.guest_type ?? "").toLowerCase().includes(q);
 
       const matchesStatus = statusFilter === "all" || uiStatus === statusFilter;
       return matchesSearch && matchesStatus;
@@ -664,6 +673,7 @@ export default function GuestListPage() {
       "dept_class",
       "unique_code",
       "status",
+      "guest_type",
       "checkin_time",
     ];
 
@@ -676,6 +686,7 @@ export default function GuestListPage() {
       g.dept_class ?? "",
       g.unique_code,
       g.status,
+      g.guest_type ?? "",
       g.checkin_time ?? "",
     ]);
 
@@ -1228,75 +1239,112 @@ export default function GuestListPage() {
             </Button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
-            <Input
-              placeholder="No Identity"
-              value={newGuest.identity_no}
-              onChange={(e) =>
-                setNewGuest((p) => ({ ...p, identity_no: e.target.value }))
-              }
-            />
-            <Input
-              placeholder="Full name *"
-              value={newGuest.full_name}
-              onChange={(e) => setNewGuest((p) => ({ ...p, full_name: e.target.value }))}
-            />
-            <Input
-              placeholder="Email"
-              value={newGuest.email}
-              onChange={(e) => setNewGuest((p) => ({ ...p, email: e.target.value }))}
-            />
+          <div className="space-y-3">
 
-            {/* Phone: country + number */}
-            <div className="flex gap-2">
+            {/* ROW 1 */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <Input
+                placeholder="No Identity"
+                value={newGuest.identity_no}
+                onChange={(e) =>
+                  setNewGuest((p) => ({ ...p, identity_no: e.target.value }))
+                }
+              />
+
+              <Input
+                placeholder="Full name *"
+                value={newGuest.full_name}
+                onChange={(e) =>
+                  setNewGuest((p) => ({ ...p, full_name: e.target.value }))
+                }
+              />
+
+              <Input
+                placeholder="Email"
+                value={newGuest.email}
+                onChange={(e) =>
+                  setNewGuest((p) => ({ ...p, email: e.target.value }))
+                }
+              />
+
+              {/* Phone */}
+              <div className="flex gap-2">
+                <Select
+                  value={newGuest.phoneCountry}
+                  onValueChange={(v) =>
+                    setNewGuest((p) => ({ ...p, phoneCountry: v }))
+                  }
+                >
+                  <SelectTrigger className="w-[110px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="+62">🇮🇩 +62</SelectItem>
+                    <SelectItem value="+60">🇲🇾 +60</SelectItem>
+                    <SelectItem value="+65">🇸🇬 +65</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Input
+                  placeholder="8231200xxxx"
+                  value={newGuest.phoneRaw}
+                  onChange={(e) =>
+                    setNewGuest((p) => ({ ...p, phoneRaw: e.target.value }))
+                  }
+                />
+              </div>
+            </div>
+
+            {/* ROW 2 */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <Input
+                placeholder="Organization"
+                value={newGuest.organization}
+                onChange={(e) =>
+                  setNewGuest((p) => ({ ...p, organization: e.target.value }))
+                }
+              />
+
+              <Input
+                placeholder="Dept / Class"
+                value={newGuest.dept_class}
+                onChange={(e) =>
+                  setNewGuest((p) => ({ ...p, dept_class: e.target.value }))
+                }
+              />
+
               <Select
-                value={newGuest.phoneCountry}
-                onValueChange={(v) => setNewGuest((p) => ({ ...p, phoneCountry: v }))}
+                value={newGuest.status}
+                onValueChange={(v) =>
+                  setNewGuest((p) => ({ ...p, status: v as GuestStatus }))
+                }
               >
-                <SelectTrigger className="w-[110px]">
-                  <SelectValue />
+                <SelectTrigger>
+                  <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="+62">🇮🇩 +62</SelectItem>
-                  <SelectItem value="+60">🇲🇾 +60</SelectItem>
-                  <SelectItem value="+65">🇸🇬 +65</SelectItem>
+                  <SelectItem value="registered">Registered</SelectItem>
+                  <SelectItem value="confirmed">Confirmed</SelectItem>
+                  <SelectItem value="checked_in">Checked In</SelectItem>
                 </SelectContent>
               </Select>
 
-              <Input
-                placeholder="8231200xxxx"
-                value={newGuest.phoneRaw}
-                onChange={(e) => setNewGuest((p) => ({ ...p, phoneRaw: e.target.value }))}
-              />
+              <Select
+                value={newGuest.guest_type}
+                onValueChange={(v) =>
+                  setNewGuest((p) => ({ ...p, guest_type: v as GuestType }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Guest Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="regular">Regular</SelectItem>
+                  <SelectItem value="vip">VIP</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
-            <Input
-              placeholder="Organization"
-              value={newGuest.organization}
-              onChange={(e) => setNewGuest((p) => ({ ...p, organization: e.target.value }))}
-            />
-
-            <Input
-              placeholder="Dept / Class"
-              value={newGuest.dept_class}
-              onChange={(e) =>
-                setNewGuest((p) => ({ ...p, dept_class: e.target.value }))
-              }
-            />
-
-            <Select
-              value={newGuest.status}
-              onValueChange={(v) => setNewGuest((p) => ({ ...p, status: v as GuestStatus }))}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="registered">Registered</SelectItem>
-                <SelectItem value="confirmed">Confirmed</SelectItem>
-                <SelectItem value="checked_in">Checked In</SelectItem>
-              </SelectContent>
-            </Select>
           </div>
 
           <p className="text-xs text-gray-500 mt-3">
@@ -1380,29 +1428,30 @@ export default function GuestListPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-[110px] text-[#0F1C2E]">No Identity</TableHead>
-                  <TableHead className="w-[180px] text-[#0F1C2E]">Name</TableHead>
-                  <TableHead className="w-[100px] text-[#0F1C2E]">Email</TableHead>
+                  <TableHead className="w-[150px] text-[#0F1C2E]">Name</TableHead>
+                  <TableHead className="w-[90px] text-[#0F1C2E]">Email</TableHead>
                   <TableHead className="w-[100px] text-[#0F1C2E]">Phone</TableHead>
                   <TableHead className="w-[140px] text-[#0F1C2E]">Organization</TableHead>
                   <TableHead className="w-[110px] text-[#0F1C2E]">Dept/Class</TableHead>
                   <TableHead className="w-[130px] text-[#0F1C2E]">Unique Code</TableHead>
                   <TableHead className="w-[70px] text-center text-[#0F1C2E]">Photo</TableHead>
                   <TableHead className="w-[120px] text-[#0F1C2E]">Status</TableHead>
+                  <TableHead className="w-[90px] text-[#0F1C2E]">Type</TableHead>
                   <TableHead className="w-[120px] text-[#0F1C2E]">Check-in</TableHead>
-                  <TableHead className="w-[150px] text-right text-[#0F1C2E]">Actions</TableHead>
+                  <TableHead className="w-[150px] text-center text-[#0F1C2E]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
 
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={11} className="text-center py-12 text-gray-500">
+                    <TableCell colSpan={12} className="text-center py-12 text-gray-500">
                       Loading guests...
                     </TableCell>
                   </TableRow>
                 ) : filteredGuests.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={11} className="text-center py-12 text-gray-500">
+                    <TableCell colSpan={12} className="text-center py-12 text-gray-500">
                       No guests found matching your criteria
                     </TableCell>
                   </TableRow>
@@ -1413,7 +1462,7 @@ export default function GuestListPage() {
 
                     return (
                       <TableRow key={g.id} className="hover:bg-[#F5F7FA]/50">
-                        <TableCell className="font-medium text-[#0F1C2E]">{g.identity_no ?? "—"}</TableCell>
+                        <TableCell className="font-medium text-[#0F1C2E] truncate">{g.identity_no ?? "—"}</TableCell>
                         <TableCell className="font-medium text-[#0F1C2E] truncate">
                           {g.full_name}
                         </TableCell>
@@ -1486,6 +1535,15 @@ export default function GuestListPage() {
                             ) : null}
                           </button>
                         </TableCell>
+
+                        <TableCell>
+                          {g.guest_type === "vip" ? (
+                            <Badge className="bg-amber-400 text-black">VIP</Badge>
+                          ) : (
+                            <Badge className="bg-slate-200 text-slate-800">Regular</Badge>
+                          )}
+                        </TableCell>
+                        
                         <TableCell className="text-gray-600">
                           {g.checkin_time
                             ? new Date(g.checkin_time).toLocaleString("en-US", {

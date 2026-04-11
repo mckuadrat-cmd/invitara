@@ -13,6 +13,7 @@ import {
   Upload,
   Image as ImageIcon,
   X,
+  Ticket,
 } from "lucide-react";
 import {
   Card,
@@ -51,6 +52,7 @@ type EventSettingsRow = {
   auto_email: boolean;
   allow_reentry: boolean;
   vip_badge_color: string;
+  vip_back_color: string;
 };
 
 type AgendaItem = {
@@ -69,6 +71,10 @@ type GradientStop = {
   id: string;
   color: string;
   position: number;
+};
+
+type VipFacilityItem = {
+  text: string;
 };
 
 function isoToLocalInput(value?: string | null) {
@@ -158,6 +164,9 @@ export default function SettingsPage() {
   const [autoEmail, setAutoEmail] = useState(false);
   const [allowReentry, setAllowReentry] = useState(false);
   const [vipBadgeColor, setVipBadgeColor] = useState("#D6C6A5");
+  const [vipBackColor, setVipBackColor] = useState("#785206");
+
+  const [vipFacilities, setVipFacilities] = useState<VipFacilityItem[]>([]);
 
   const [themeTextMode, setThemeTextMode] = useState<"auto" | "manual">("auto");
 
@@ -455,6 +464,14 @@ export default function SettingsPage() {
     setThemeHeroGlowSizeY(String(hero.glow?.sizeY ?? 500));
     setThemeHeroGlowOpacityHex(hero.glow?.opacityHex ?? "22");
 
+    setVipFacilities(
+      Array.isArray(t.vip?.facilities)
+        ? t.vip.facilities.map((item: string) => ({
+            text: item ?? "",
+          }))
+        : []
+    );
+
     setAgendaItems(
       Array.isArray(t.agenda)
         ? t.agenda.map((item: any) => ({
@@ -470,7 +487,7 @@ export default function SettingsPage() {
 
     const st = await supabase
       .from("event_settings")
-      .select("event_id,qr_format,auto_email,allow_reentry,vip_badge_color")
+      .select("event_id,qr_format,auto_email,allow_reentry,vip_badge_color,vip_back_color")
       .eq("event_id", eventId)
       .maybeSingle();
 
@@ -480,11 +497,13 @@ export default function SettingsPage() {
       setAutoEmail(!!s.auto_email);
       setAllowReentry(!!s.allow_reentry);
       setVipBadgeColor(s.vip_badge_color ?? "#D6C6A5");
+      setVipBackColor(s.vip_back_color ?? "#785206");
     } else {
       setQrFormat("QR Code v1");
       setAutoEmail(false);
       setAllowReentry(false);
       setVipBadgeColor("#D6C6A5");
+      setVipBackColor("#785206");
     }
 
     setLoading(false);
@@ -578,6 +597,17 @@ export default function SettingsPage() {
         },
         agenda: agendaItems,
         faqs: faqItems,
+
+        vip: {
+          badgeColor: vipBadgeColor,
+          backColor: vipBackColor,
+          guestGreetingVip: "Tamu Kehormatan",
+          aboutVip:
+            "Dengan hormat, kami mengundang Bapak/Ibu sebagai tamu VIP untuk menghadiri acara berikut.",
+          facilities: vipFacilities
+            .map((item) => item.text.trim())
+            .filter(Boolean),
+        },
       };
 
       const upEv = await supabase
@@ -601,6 +631,7 @@ export default function SettingsPage() {
             auto_email: autoEmail,
             allow_reentry: allowReentry,
             vip_badge_color: vipBadgeColor,
+            vip_back_color: vipBackColor,
           },
           { onConflict: "event_id" }
         );
@@ -668,6 +699,28 @@ export default function SettingsPage() {
 
   function downFaq(idx: number) {
     setFaqItems((prev) => move(prev, idx, idx + 1));
+  }
+
+  function updateVipFacility(idx: number, patch: Partial<VipFacilityItem>) {
+  setVipFacilities((prev) =>
+    prev.map((it, i) => (i === idx ? { ...it, ...patch } : it))
+  );
+}
+
+  function addVipFacility() {
+    setVipFacilities((prev) => [...prev, { text: "" }]);
+  }
+
+  function removeVipFacility(idx: number) {
+    setVipFacilities((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function upVipFacility(idx: number) {
+    setVipFacilities((prev) => move(prev, idx, idx - 1));
+  }
+
+  function downVipFacility(idx: number) {
+    setVipFacilities((prev) => move(prev, idx, idx + 1));
   }
 
   if (!eventId) return <div className="p-4">Missing eventId in route.</div>;
@@ -867,17 +920,26 @@ export default function SettingsPage() {
                 />
               </div>
 
-              <div className="md:col-span-2">
-                <Label>Preview Text</Label>
-                <div
-                  className="h-12 rounded-xl border px-3 flex items-center text-sm"
-                  style={{
-                    background: themePageBaseColor,
-                    color: previewTextColors.primary
-                  }}
-                >
-                  Pilih warna teks yang sesuai
-                </div>
+              <div>
+                <Label>VIP Badge Color</Label>
+                <Input
+                  type="color"
+                  value={vipBadgeColor}
+                  onChange={(e) => setVipBadgeColor(e.target.value)}
+                  disabled={loading}
+                  className="h-12"
+                />
+              </div>
+
+              <div>
+                <Label>VIP Background Color</Label>
+                <Input
+                  type="color"
+                  value={vipBackColor}
+                  onChange={(e) => setVipBackColor(e.target.value)}
+                  disabled={loading}
+                  className="h-12"
+                />
               </div>
             </div>
 
@@ -1557,6 +1619,89 @@ export default function SettingsPage() {
                         </Button>
                       </div>
                     </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="font-semibold text-[#0F1C2E]">VIP Fasilitas</div>
+                  <div className="text-sm text-gray-600">
+                    Fasilitas untuk tamu VIP.
+                  </div>
+                </div>
+
+                <Button
+                  type="button"
+                  onClick={addVipFacility}
+                  disabled={loading}
+                  className="bg-[#0F1C2E] hover:bg-[#0F1C2E]/90 text-white"
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add
+                </Button>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                {vipFacilities.length === 0 ? (
+                  <div className="text-sm text-gray-500">
+                    Belum ada fasilitas VIP. Klik <span className="font-semibold">Add</span>.
+                  </div>
+                ) : (
+                  vipFacilities.map((it, idx) => (
+                  <div key={idx}>
+                    <div className="flex items-center gap-3">
+                      
+                      <div className="flex-1">
+                        <Input
+                          value={it.text}
+                          onChange={(e) =>
+                            updateVipFacility(idx, { text: e.target.value })
+                          }
+                          placeholder="Contoh: Akses prioritas"
+                          disabled={loading}
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="border-gray-300"
+                          onClick={() => upVipFacility(idx)}
+                          disabled={loading || idx === 0}
+                          title="Move up"
+                        >
+                          <ArrowUp className="w-4 h-4" />
+                        </Button>
+
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="border-gray-300"
+                          onClick={() => downVipFacility(idx)}
+                          disabled={loading || idx === vipFacilities.length - 1}
+                          title="Move down"
+                        >
+                          <ArrowDown className="w-4 h-4" />
+                        </Button>
+
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="border-red-200 text-red-600 hover:bg-red-50"
+                          onClick={() => removeVipFacility(idx)}
+                          disabled={loading}
+                          title="Delete"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+
+                    </div>
+                  </div>
                   ))
                 )}
               </div>
