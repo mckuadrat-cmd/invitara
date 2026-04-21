@@ -1,6 +1,5 @@
-// src/pages/LoginPage.tsx
-import { useEffect, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { Card, CardContent } from "../components/ui/card";
 import { Input } from "../components/ui/input";
@@ -10,10 +9,8 @@ async function resolveEmail(identifier: string) {
   const input = identifier.trim();
   if (!input) return "";
 
-  // kalau email langsung
   if (input.includes("@")) return input.toLowerCase();
 
-  // username -> lewat edge function (service role)
   const { data, error } = await supabase.functions.invoke(
     "resolve_login_identifier",
     { body: { identifier: input } }
@@ -28,45 +25,36 @@ async function resolveEmail(identifier: string) {
   return email.toLowerCase();
 }
 
-export default function LoginPage() {
-  const nav = useNavigate();
-  const loc = useLocation();
-
+export default function ForgotPasswordPage() {
   const [identifier, setIdentifier] = useState("");
-  const [password, setPassword] = useState("");
-
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
 
-  // kalau sudah login, redirect sesuai role
-    useEffect(() => {
-      (async () => {
-        const { data } = await supabase.auth.getSession();
-        if (data.session?.user?.id) nav("/app", { replace: true });
-      })();
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-    
-  async function handleLogin(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
+    setOk(null);
     setLoading(true);
 
     try {
       const email = await resolveEmail(identifier);
 
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      const redirectTo = `${window.location.origin}/reset-password`;
+
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo,
       });
+
       if (error) throw error;
 
-      nav("/app", { replace: true });
-
-      } catch (e: any) {
-        setErr(e?.message ?? "Login failed");
-      } finally {
-        setLoading(false);
+      setOk(
+        "Link reset password sudah dikirim. Silakan cek email kamu, lalu klik link-nya."
+      );
+    } catch (e: any) {
+      setErr(e?.message ?? "Gagal mengirim email reset password.");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -81,7 +69,12 @@ export default function LoginPage() {
               className="mx-auto h-10 mb-2"
               onError={(e) => ((e.currentTarget.style.display = "none") as any)}
             />
-            <p className="text-sm text-gray-600">Login untuk akses dashboard</p>
+            <h1 className="text-xl font-semibold text-[#0F1C2E]">
+              Lupa Password
+            </h1>
+            <p className="text-sm text-gray-600 mt-1">
+              Masukkan username atau email untuk menerima link reset password
+            </p>
           </div>
 
           {err && (
@@ -90,7 +83,13 @@ export default function LoginPage() {
             </div>
           )}
 
-          <form onSubmit={handleLogin} className="space-y-3">
+          {ok && (
+            <div className="mb-4 rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-700">
+              {ok}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-3">
             <div>
               <label className="text-sm text-gray-700">Username / Email</label>
               <Input
@@ -101,37 +100,22 @@ export default function LoginPage() {
               />
             </div>
 
-            <div>
-              <label className="text-sm text-gray-700">Password</label>
-              <Input
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                type="password"
-                autoComplete="current-password"
-              />
-            </div>
-
             <Button
               type="submit"
               className="w-full bg-[#0F1C2E] hover:bg-[#0F1C2E]/90 text-white mt-4"
               disabled={loading}
             >
-              {loading ? "Signing in..." : "Login"}
+              {loading ? "Mengirim..." : "Kirim Link Reset"}
             </Button>
 
-            <div className="text-center">
+            <div className="text-center pt-2">
               <Link
-                to="/forgot-password"
+                to="/login"
                 className="text-sm text-[#0F1C2E] hover:underline"
               >
-                Lupa password?
+                Kembali ke login
               </Link>
             </div>
-
-            <p className="text-xs text-center text-gray-500 mt-3">
-              Gunakan email atau username yang terdaftar
-            </p>
           </form>
         </CardContent>
       </Card>

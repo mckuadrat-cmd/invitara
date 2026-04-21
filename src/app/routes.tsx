@@ -23,6 +23,8 @@ import PostLoginRedirectPage from "./pages/PostLoginRedirectPage";
 import LoginPage from "./pages/LoginPage";
 import ForbiddenPage from "./pages/ForbiddenPage";
 import NotFoundPage from "./pages/NotFoundPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 
 import ScannerStandalonePage from "./pages/ScannerStandalonePage";
 
@@ -39,6 +41,8 @@ export const router = createBrowserRouter([
 
   // Auth
   { path: "/login", element: <LoginPage /> },
+  { path: "/forgot-password", element: <ForgotPasswordPage /> },
+  { path: "/reset-password", element: <ResetPasswordPage /> },
   { path: "/forbidden", element: <ForbiddenPage /> },
   { path: "/auth/complete-invite", element: <CompleteInvitePage /> },
 

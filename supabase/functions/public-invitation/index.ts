@@ -58,21 +58,24 @@ serve(async (req) => {
       return jsonResponse({ error: "Kode undangan tidak ditemukan." }, 400);
     }
 
-    const { data: guest, error: guestErr } = await supabase
-      .from("guests")
-      .select(`
-        id,
-        event_id,
-        identity_no,
-        full_name,
-        organization,
-        dept_class,
-        unique_code,
-        status,
-        checkin_time
-      `)
-      .eq("unique_code", code)
-      .maybeSingle();
+  const { data: guest, error: guestErr } = await supabase
+    .from("guests")
+    .select(`
+      id,
+      event_id,
+      identity_no,
+      full_name,
+      email,
+      phone,
+      organization,
+      dept_class,
+      unique_code,
+      guest_type,
+      status,
+      checkin_time
+    `)
+    .eq("unique_code", code)
+    .maybeSingle();
 
     if (guestErr) throw guestErr;
     if (!guest) {
@@ -153,7 +156,7 @@ serve(async (req) => {
 
     const { data: settings, error: settingsErr } = await supabase
       .from("event_settings")
-      .select("event_id, qr_format")
+      .select("event_id, qr_format, vip_badge_color, vip_back_color")
       .eq("event_id", guest.event_id)
       .maybeSingle();
 
@@ -161,8 +164,12 @@ serve(async (req) => {
 
     return jsonResponse({
       guest,
-      event,
-      qrFormat: settings?.qr_format ?? "QR Code v1",
+      event: {
+        ...event,
+        vip_badge_color: settings?.vip_badge_color ?? null,
+        vip_back_color: settings?.vip_back_color ?? null,
+      },
+       qrFormat: settings?.qr_format ?? "QR Code v1",
     });
   } catch (err: any) {
     return jsonResponse(
