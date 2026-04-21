@@ -221,7 +221,7 @@ export default function GuestListPage() {
   const [pageSize, setPageSize] = useState(10);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [confirmMode, setConfirmMode] = useState<"one" | "all" | "confirm_all">("one");
+  const [confirmMode, setConfirmMode] = useState<"one" | "all" | "confirm_all" | "unconfirm_all">("one");
   const [targetGuest, setTargetGuest] = useState<GuestRow | null>(null);
 
   // Email sending state
@@ -410,6 +410,11 @@ export default function GuestListPage() {
 
       if (confirmMode === "confirm_all") {
         await confirmAllGuests();
+        return;
+      }
+
+      if (confirmMode === "unconfirm_all") {
+        await unconfirmAllGuests();
         return;
       }
     } catch (e: any) {
@@ -946,10 +951,58 @@ export default function GuestListPage() {
     }
   }
 
+  async function unconfirmAllGuests() {
+    if (!eventId) return;
+
+    const targetGuests = guests.filter((g) => g.status === "confirmed");
+
+    if (targetGuests.length === 0) {
+      setErr(null);
+      setConfirmOpen(false);
+      alert("Tidak ada guest confirmed yang perlu dikembalikan ke registered.");
+      return;
+    }
+
+    try {
+      setErr(null);
+      setConfirmingAll(true);
+
+      const { error } = await supabase
+        .from("guests")
+        .update({ status: "registered" })
+        .in(
+          "id",
+          targetGuests.map((g) => g.id)
+        );
+
+      if (error) throw error;
+
+      setConfirmOpen(false);
+      await loadGuests();
+    } catch (e: any) {
+      setErr(e?.message ?? "Gagal unconfirm all");
+    } finally {
+      setConfirmingAll(false);
+    }
+  }
+
   const total = guests.length;
   const checkedIn = guests.filter((g) => g.status === "checked_in").length;
   const confirmed = guests.filter((g) => g.status === "confirmed").length;
   const registered = guests.filter((g) => g.status === "registered").length;
+
+  const hasRegisteredGuests = guests.some((g) => g.status === "registered");
+  const hasConfirmedGuests = guests.some((g) => g.status === "confirmed");
+
+  const bulkConfirmAction =
+    hasRegisteredGuests ? "confirm_all" : hasConfirmedGuests ? "unconfirm_all" : null;
+
+  const bulkConfirmLabel =
+    bulkConfirmAction === "confirm_all"
+      ? "Confirm All"
+      : bulkConfirmAction === "unconfirm_all"
+      ? "Unconfirm All"
+      : "Confirm All";
 
   const filteredHasEmailCount = useMemo(
     () => filteredGuests.filter((g) => !!g.email).length,
@@ -1110,20 +1163,25 @@ export default function GuestListPage() {
             {bulkSending ? "Sending..." : "Send All (Filtered)"}
           </Button>
 
-          {role === "owner" && (
-            <Button
-              onClick={() => {
-                setConfirmMode("confirm_all");
-                setTargetGuest(null);
-                setConfirmOpen(true);
-              }}
-              className="bg-[#0F1C2E] text-white hover:bg-[#0F1C2E]/90"
-              disabled={loading || confirmingAll || guests.filter((g) => g.status === "registered").length === 0}
-            >
-              <Check className="w-4 h-4 mr-2" />
-              {confirmingAll ? "Confirming..." : "Confirm All"}
-            </Button>
-          )}
+            {role === "owner" && (
+              <Button
+                onClick={() => {
+                  if (!bulkConfirmAction) return;
+                  setConfirmMode(bulkConfirmAction);
+                  setTargetGuest(null);
+                  setConfirmOpen(true);
+                }}
+                className="bg-[#0F1C2E] text-white hover:bg-[#0F1C2E]/90"
+                disabled={loading || confirmingAll || !bulkConfirmAction}
+              >
+                <Check className="w-4 h-4 mr-2" />
+                {confirmingAll
+                  ? bulkConfirmAction === "confirm_all"
+                    ? "Confirming..."
+                    : "Unconfirming..."
+                  : bulkConfirmLabel}
+              </Button>
+            )}
 
           {role === "owner" && (
             <Button
@@ -1174,6 +1232,8 @@ export default function GuestListPage() {
                 ? "Delete all guests?"
                 : confirmMode === "confirm_all"
                 ? "Confirm all guests?"
+                : confirmMode === "unconfirm_all"
+                ? "Unconfirm all guests?"
                 : "Delete guest?"}
             </DialogTitle>
           </DialogHeader>
@@ -1188,6 +1248,11 @@ export default function GuestListPage() {
                 Ini akan mengubah semua guest dengan status <b>registered</b> menjadi <b>confirmed</b>.
                 Guest yang sudah <b>confirmed</b> atau <b>checked_in</b> tidak akan berubah.
               </>
+            ) : confirmMode === "unconfirm_all" ? (
+              <>
+                Ini akan mengubah semua guest dengan status <b>confirmed</b> menjadi <b>registered</b>.
+                Guest yang sudah <b>checked_in</b> tidak akan berubah.
+              </>
             ) : (
               <>
                 Hapus guest: <b>{targetGuest?.full_name}</b>? Aksi ini tidak bisa dibatalkan.
@@ -1201,7 +1266,7 @@ export default function GuestListPage() {
             </Button>
             <Button
               className={
-                confirmMode === "confirm_all"
+                confirmMode === "confirm_all" || confirmMode === "unconfirm_all"
                   ? "bg-[#0F1C2E] hover:bg-[#0F1C2E]/90 text-white"
                   : "bg-red-600 hover:bg-red-700 text-white"
               }
@@ -1212,6 +1277,10 @@ export default function GuestListPage() {
                 ? confirmingAll
                   ? "Confirming..."
                   : "Confirm All"
+                : confirmMode === "unconfirm_all"
+                ? confirmingAll
+                  ? "Unconfirming..."
+                  : "Unconfirm All"
                 : "Delete"}
             </Button>
           </div>
