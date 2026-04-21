@@ -18,7 +18,7 @@ export default function ScannerStandalonePage() {
       <div className="sticky top-0 z-50 bg-white border-b">
         <div className="max-w-5xl mx-auto p-3 flex items-center justify-between">
           <div className="text-sm text-gray-600">
-            Scanner Mode {eventId ? <span className="ml-2 font-mono text-xs">({eventId})</span> : null}
+            Scanner Mode
           </div>
           <div className="flex gap-2">
             <Button className="bg-[#0F1C2E] text-white" onClick={logout}>

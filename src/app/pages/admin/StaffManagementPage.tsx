@@ -115,6 +115,23 @@ type ConfirmAction =
     }
   | null;
 
+function fmtDateTime(iso: string | null) {
+  if (!iso) return "Waktu menyusul";
+  try {
+    return new Date(iso).toLocaleString("id-ID", {
+      weekday: "long",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short",
+    });
+  } catch {
+    return "Waktu menyusul";
+  }
+}
+
 export default function StaffManagementPage() {
   const { eventId } = useParams();
 
@@ -877,8 +894,7 @@ export default function StaffManagementPage() {
         <div>
           <h1 className="text-2xl text-[#0F1C2E] font-semibold">Staff Management</h1>
           <p className="text-sm text-gray-600">
-            Event: <span className="font-medium">{eventName || "—"}</span>{" "}
-            <span className="ml-2 font-mono text-xs text-gray-500">({eventId})</span>
+            Event: <span className="font-medium">{eventName || "—"}</span>
           </p>
           <p className="text-xs text-gray-500 mt-1">
             Global role: <b>{myGlobalRole}</b>

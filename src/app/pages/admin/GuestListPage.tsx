@@ -999,10 +999,10 @@ export default function GuestListPage() {
 
   const bulkConfirmLabel =
     bulkConfirmAction === "confirm_all"
-      ? "Confirm All"
+      ? "Confirm"
       : bulkConfirmAction === "unconfirm_all"
-      ? "Unconfirm All"
-      : "Confirm All";
+      ? "Unconfirm"
+      : "Confirm";
 
   const filteredHasEmailCount = useMemo(
     () => filteredGuests.filter((g) => !!g.email).length,
@@ -1160,28 +1160,28 @@ export default function GuestListPage() {
             }
           >
             <Send className="w-4 h-4 mr-2" />
-            {bulkSending ? "Sending..." : "Send All (Filtered)"}
+            {bulkSending ? "Sending..." : "Send (Filter)"}
           </Button>
 
-            {role === "owner" && (
-              <Button
-                onClick={() => {
-                  if (!bulkConfirmAction) return;
-                  setConfirmMode(bulkConfirmAction);
-                  setTargetGuest(null);
-                  setConfirmOpen(true);
-                }}
-                className="bg-[#0F1C2E] text-white hover:bg-[#0F1C2E]/90"
-                disabled={loading || confirmingAll || !bulkConfirmAction}
-              >
-                <Check className="w-4 h-4 mr-2" />
-                {confirmingAll
-                  ? bulkConfirmAction === "confirm_all"
-                    ? "Confirming..."
-                    : "Unconfirming..."
-                  : bulkConfirmLabel}
-              </Button>
-            )}
+          {role === "owner" && (
+            <Button
+              onClick={() => {
+                if (!bulkConfirmAction) return;
+                setConfirmMode(bulkConfirmAction);
+                setTargetGuest(null);
+                setConfirmOpen(true);
+              }}
+              className="bg-[#0F1C2E] text-white hover:bg-[#0F1C2E]/90"
+              disabled={loading || confirmingAll || !bulkConfirmAction}
+            >
+              <Check className="w-4 h-4 mr-2" />
+              {confirmingAll
+                ? bulkConfirmAction === "confirm_all"
+                  ? "Confirming..."
+                  : "Unconfirming..."
+                : bulkConfirmLabel}
+            </Button>
+          )}
 
           {role === "owner" && (
             <Button
@@ -1190,7 +1190,7 @@ export default function GuestListPage() {
               disabled={loading || downloadingAllPdf || !event || guests.filter((g) => g.status === "confirmed" || g.status === "checked_in").length === 0}
             >
               <Download className="w-4 h-4 mr-2" />
-              {downloadingAllPdf ? "Preparing ZIP..." : "Download PDF All"}
+              {downloadingAllPdf ? "Preparing ZIP..." : "Download Ticket"}
             </Button>
           )}
 
