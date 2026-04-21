@@ -151,6 +151,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [uploadingHero, setUploadingHero] = useState(false);
+  const [initialSignature, setInitialSignature] = useState("");
 
   const [eventName, setEventName] = useState("");
   const [eventStartDate, setEventStartDate] = useState("");
@@ -267,6 +268,125 @@ export default function SettingsPage() {
     autoTextMode,
   ]);
 
+  const currentSignature = useMemo(
+    () =>
+      JSON.stringify({
+        eventName,
+        eventStartDate,
+        eventEndDate,
+        location,
+        locationName,
+        locationAddress,
+        qrFormat,
+        autoEmail,
+        allowReentry,
+        vipBadgeColor,
+        vipBackColor,
+        vipFacilities,
+        themeTextMode,
+        themeTextPrimary,
+        themeTextSecondary,
+        themeTextMuted,
+        themePrimary,
+        themeAccent,
+        themeGradientType,
+        themeGradientAngle,
+        themeGradientStops,
+        themePageBaseColor,
+        themeCardColorHex,
+        themeCardOpacity,
+        themeLogoUrl,
+        themeHeroUrl,
+        themeButtonPrimaryBg,
+        themeButtonPrimaryText,
+        themeButtonSecondaryBg,
+        themeButtonSecondaryText,
+        themeTagline,
+        themeHeadline,
+        themeAbout,
+        themeHostName,
+        themeSalam,
+        themeGuestGreeting,
+        themeDresscodeMale,
+        themeDresscodeFemale,
+        themeClosingText,
+        themeHeroMode,
+        themeHeroHeight,
+        themeHeroOverlayColor,
+        themeHeroOverlayOpacity,
+        themeHeroImagePosition,
+        themeHeroImageSize,
+        themeHeroGlowEnabled,
+        themeHeroGlowColor,
+        themeHeroGlowX,
+        themeHeroGlowY,
+        themeHeroGlowSizeX,
+        themeHeroGlowSizeY,
+        themeHeroGlowOpacityHex,
+        agendaItems,
+        faqItems,
+      }),
+    [
+      eventName,
+      eventStartDate,
+      eventEndDate,
+      location,
+      locationName,
+      locationAddress,
+      qrFormat,
+      autoEmail,
+      allowReentry,
+      vipBadgeColor,
+      vipBackColor,
+      vipFacilities,
+      themeTextMode,
+      themeTextPrimary,
+      themeTextSecondary,
+      themeTextMuted,
+      themePrimary,
+      themeAccent,
+      themeGradientType,
+      themeGradientAngle,
+      themeGradientStops,
+      themePageBaseColor,
+      themeCardColorHex,
+      themeCardOpacity,
+      themeLogoUrl,
+      themeHeroUrl,
+      themeButtonPrimaryBg,
+      themeButtonPrimaryText,
+      themeButtonSecondaryBg,
+      themeButtonSecondaryText,
+      themeTagline,
+      themeHeadline,
+      themeAbout,
+      themeHostName,
+      themeSalam,
+      themeGuestGreeting,
+      themeDresscodeMale,
+      themeDresscodeFemale,
+      themeClosingText,
+      themeHeroMode,
+      themeHeroHeight,
+      themeHeroOverlayColor,
+      themeHeroOverlayOpacity,
+      themeHeroImagePosition,
+      themeHeroImageSize,
+      themeHeroGlowEnabled,
+      themeHeroGlowColor,
+      themeHeroGlowX,
+      themeHeroGlowY,
+      themeHeroGlowSizeX,
+      themeHeroGlowSizeY,
+      themeHeroGlowOpacityHex,
+      agendaItems,
+      faqItems,
+    ]
+  );
+
+  const hasUnsavedChanges =
+    !loading && !!initialSignature && currentSignature !== initialSignature;
+
   async function uploadAsset(file: File, folder: "logos" | "heroes") {
     if (!eventId) throw new Error("Event ID tidak ditemukan.");
 
@@ -362,6 +482,7 @@ export default function SettingsPage() {
     if (!eventId) return;
 
     setLoading(true);
+    setInitialSignature("");
 
     const ev = await supabase
       .from("events")
@@ -514,6 +635,12 @@ export default function SettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
 
+  useEffect(() => {
+    if (!loading && !initialSignature) {
+      setInitialSignature(currentSignature);
+    }
+  }, [loading, initialSignature, currentSignature]);
+
   async function handleSave() {
     if (!eventId) return;
     setSaving(true);
@@ -638,7 +765,8 @@ export default function SettingsPage() {
 
       if (upSt.error) throw new Error(upSt.error.message);
 
-      toast.success("Settings berhasil disimpan");
+      setInitialSignature(currentSignature);
+      toast.success("Saved successfully");
     } catch (e: any) {
       toast.error(e?.message ?? "Save failed");
     } finally {
@@ -726,7 +854,7 @@ export default function SettingsPage() {
   if (!eventId) return <div className="p-4">Missing eventId in route.</div>;
 
   return (
-    <div className="max-w-5xl">
+    <div className="w-full max-w-8xl px-4 md:px-6 pb-20">
       <div className="mb-8">
         <h1 className="text-3xl text-[#0F1C2E] mb-2">Event Settings</h1>
         <p className="text-gray-600">Configure details & preferences (per event)</p>
@@ -1769,19 +1897,32 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        <div className="flex justify-end gap-4 pt-4">
-          <Button variant="outline" className="border-gray-300" disabled={saving}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleSave}
-            className="bg-[#0F1C2E] hover:bg-[#0F1C2E]/90 text-white"
-            disabled={loading || saving}
-          >
-            <Save className="w-4 h-4 mr-2" />
-            {saving ? "Saving..." : "Save Settings"}
-          </Button>
-        </div>
+        {hasUnsavedChanges && (
+          <div className="fixed top-4 right-4 md:top-6 md:right-6 z-50 flex gap-2">
+            
+            {/* Cancel */}
+            <Button
+              onClick={loadAll}
+              variant="outline"
+              className="h-11 w-11 rounded-full border-gray-300 bg-white shadow-md hover:bg-gray-100"
+              disabled={loading || saving}
+              title="Cancel changes"
+            >
+              <X className="h-5 w-5" />
+            </Button>
+
+            {/* Save */}
+            <Button
+              onClick={handleSave}
+              className="h-11 w-11 rounded-full bg-[#0F1C2E] text-white shadow-lg hover:bg-[#0F1C2E]/90 hover:scale-105 transition-all duration-200"
+              disabled={loading || saving}
+              title={saving ? "Saving..." : "Save settings"}
+            >
+              <Save className="h-5 w-5" />
+            </Button>
+
+          </div>
+        )}
       </div>
     </div>
   );

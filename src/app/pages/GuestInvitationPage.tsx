@@ -1139,7 +1139,7 @@ export default function GuestInvitationPage() {
 
               <div
                 className="mt-6 text-lg leading-relaxed"
-                style={{ color: adaptiveText.secondary }}
+                style={{ color: adaptiveText.primary }}
               >
                 Kepada Yth.
                 <br />
@@ -1173,12 +1173,12 @@ export default function GuestInvitationPage() {
                 </div>
               ) : null}
 
-              <p className="mt-8 text-md" style={{ color: adaptiveText.secondary }}>
+              <p className="mt-8 text-md" style={{ color: adaptiveText.primary }}>
                 {salam} {greetingByHour()},
               </p>
               <p
                 className="mt-2 max-w-2xl leading-relaxed"
-                style={{ color: adaptiveText.secondary }}
+                style={{ color: adaptiveText.primary }}
               >
                 {effectiveAbout}
               </p>
