@@ -1583,7 +1583,7 @@ export default function SettingsPage() {
                       className="rounded-lg border border-gray-200 bg-[#F5F7FA] p-4"
                     >
                       <div className="grid md:grid-cols-12 gap-3 items-start">
-                        <div className="md:col-span-2">
+                        <div className="md:col-span-1">
                           <Label className="text-xs">Mulai</Label>
                           <Input
                             type="time"
@@ -1593,7 +1593,7 @@ export default function SettingsPage() {
                           />
                         </div>
 
-                        <div className="md:col-span-2">
+                        <div className="md:col-span-1">
                           <Label className="text-xs">Selesai</Label>
                           <Input
                             type="time"
@@ -1603,7 +1603,7 @@ export default function SettingsPage() {
                           />
                         </div>
 
-                        <div className="md:col-span-3">
+                        <div className="md:col-span-4">
                           <Label className="text-xs">Title</Label>
                           <Textarea
                             value={it.title}
@@ -1623,7 +1623,7 @@ export default function SettingsPage() {
                           />
                         </div>
 
-                        <div className="md:col-span-5">
+                        <div className="md:col-span-6">
                           <Label className="text-xs">Note (optional)</Label>
                           <Textarea
                             value={it.note ?? ""}

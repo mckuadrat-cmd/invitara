@@ -996,7 +996,7 @@ export default function GuestInvitationPage() {
     heroMode === "image-overlay" ||
     heroMode === "image-gradient-blend";
 
-  const contentBackground = isHeroImageMode ? pageGradient : effectivePrimary;
+  const contentBackground = pageGradient;
 
   return (
       <div
@@ -1008,17 +1008,18 @@ export default function GuestInvitationPage() {
       >
       <section
         className="relative overflow-hidden"
-        style={{ minHeight: `max(${heroHeight}px, 70vh)` }}
+        style={{ minHeight: `max(${Math.max(420, heroHeight)}px, 70vh)` }}
       >
 
         {/* FLOATING LOGO */}
         {brand.logoUrl && (
-          <div className="fixed top-10 left-12 md:top-12 md:left-18 z-50">
-            <div className="rounded-xl bg-white backdrop-blur-md px-3 py-2 shadow-lg">
+          <div className="fixed top-4 left-4 sm:top-6 sm:left-6 z-40 max-w-[calc(100vw-2rem)]">
+            <div className="rounded-xl bg-white/95 backdrop-blur-md px-3 py-2 shadow-lg">
               <img
                 src={brand.logoUrl}
                 alt="Event Logo"
-                className="h-15 md:h-15 w-auto object-contain"
+                className="w-auto object-contain"
+                style={{ height: 44, maxWidth: "160px" }}
               />
             </div>
           </div>
@@ -1034,8 +1035,8 @@ export default function GuestInvitationPage() {
           }}
         />
 
-        <div className="relative max-w-6xl mx-auto px-6 pt-12 pb-16">
-          <div className="mt-16 grid lg:grid-cols-[1.1fr_0.9fr] gap-8 items-start">
+        <div className="relative max-w-6xl mx-auto px-4 sm:px-6 pt-20 sm:pt-24 pb-12 sm:pb-16">
+          <div className="mt-10 sm:mt-14 grid lg:grid-cols-[1.1fr_0.9fr] gap-6 sm:gap-8 items-start">
             <div>
               <div className="flex items-center gap-3 flex-wrap">
                 <div
@@ -1064,15 +1065,15 @@ export default function GuestInvitationPage() {
 
               <div className="mt-4 flex items-center gap-5">
                 <h1
-                  className="text-4xl md:text-5xl font-semibold tracking-tight leading-[1.1]"
+                  className="text-3xl sm:text-4xl md:text-5xl font-semibold tracking-tight leading-[1.1] break-words"
                   style={{ color: adaptiveText.primary }}
                 >
-                  {headline}
+                  {effectiveHeadline}
                 </h1>
               </div>
 
               <div
-                className="mt-4 flex flex-wrap gap-6"
+                className="mt-4 flex flex-col sm:flex-row sm:flex-wrap gap-3 sm:gap-6"
                 style={{ color: adaptiveText.secondary }}
               >
                 <div className="flex items-center gap-2">
@@ -1101,13 +1102,13 @@ export default function GuestInvitationPage() {
                     }}
                   >
                     <div
-                      className="text-sm uppercase tracking-[0.18em] mb-3"
+                      className="text-xs sm:text-sm uppercase tracking-[0.18em] mb-3"
                       style={{ color: effectiveAccent }}
                     >
                       VIP Benefits
                     </div>
 
-                    <div className="mt-3 flex flex-wrap gap-1">
+                    <div className="mt-3 flex flex-wrap gap-2">
                       {vipFacilities.map((item, idx) => (
                         <span
                           key={idx}
@@ -1130,7 +1131,7 @@ export default function GuestInvitationPage() {
                 </div>
 
                 {countdown.isExpired ? (
-                  <div className="rounded-2xl border border-green-400/20 bg-green-500/10 px-5 py-4 text-green-200">
+                  <div className="rounded-2xl border border-green-400/20 bg-green-500/10 px-4 sm:px-5 py-4 text-green-200">
                     Acara sedang berlangsung atau waktu acara sudah lewat.
                   </div>
                 ) : (
@@ -1171,7 +1172,7 @@ export default function GuestInvitationPage() {
                   </div>
                 ) : null}
                 <span
-                  className="text-2xl md:text-3xl font-semibold"
+                  className="block mt-1 text-2xl sm:text-3xl font-semibold break-words"
                   style={{ color: adaptiveText.primary }}
                 >
                   {guest.full_name}
@@ -1199,7 +1200,7 @@ export default function GuestInvitationPage() {
                 {salam} {greetingByHour()},
               </p>
               <p
-                className="mt-2 max-w-2xl leading-relaxed"
+                className="mt-2 max-w-2xl leading-relaxed text-sm sm:text-base"
                 style={{ color: adaptiveText.primary }}
               >
                 {effectiveAbout}
@@ -1207,18 +1208,18 @@ export default function GuestInvitationPage() {
             </div>
 
             <div
-              className="rounded-3xl overflow-hidden border shadow-[0_16px_60px_rgba(0,0,0,0.45)]"
+              className="rounded-3xl overflow-hidden border shadow-[0_16px_60px_rgba(0,0,0,0.45)] w-full"
               style={{
                 backgroundColor: cardColor,
                 borderColor: adaptiveText.cardBorder,
               }}
             >
-              <div className="flex flex-wrap gap-2 p-5 justify-end">
+              <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 p-4 sm:p-5 sm:justify-end">
                 {guest.status === "registered" ? (
                   <ThemedButton
                     onClick={confirmAttendance}
                     disabled={actionLoading}
-                    className="h-11 rounded-xl px-6"
+                    className="h-11 rounded-xl px-6 w-full sm:w-auto justify-center"
                     backgroundColor={buttonSecondaryBg}
                     textColor={buttonSecondaryText}
                   >
@@ -1228,7 +1229,7 @@ export default function GuestInvitationPage() {
                   <ThemedButton
                     onClick={downloadPremiumBoardingPassPDF}
                     variant="outline"
-                    className="h-11 rounded-xl"
+                    className="h-11 rounded-xl w-full sm:w-auto justify-center"
                     backgroundColor={buttonPrimaryBg}
                     textColor={buttonPrimaryText}
                   >
@@ -1240,7 +1241,7 @@ export default function GuestInvitationPage() {
                   <ThemedButton
                     asChild
                     variant="outline"
-                    className="h-11 rounded-xl"
+                    className="h-11 rounded-xl w-full sm:w-auto justify-center"
                     backgroundColor={buttonPrimaryBg}
                     textColor={buttonPrimaryText}
                   >
@@ -1248,7 +1249,7 @@ export default function GuestInvitationPage() {
                       href={mapsUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="h-11 items-center justify-center px-4 rounded-xl"
+                      className="h-11 flex w-full items-center justify-center px-4 rounded-xl"
                     >
                       <MapPinHouse className="w-4 h-4 mr-2" />
                       Lihat Lokasi
@@ -1270,7 +1271,7 @@ export default function GuestInvitationPage() {
               </div>
 
               <div
-                className="p-5 border-b"
+                className="p-4 sm:p-5 border-b"
                 style={{
                   background: `linear-gradient(135deg, ${rgbaFromHex(
                     primary,
@@ -1279,7 +1280,7 @@ export default function GuestInvitationPage() {
                   borderColor: adaptiveText.cardBorder,
                 }}
               >
-                <div className="mt-auto grid grid-cols-2 gap-3 text-sm">
+                <div className="mt-auto grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                   <div className="p-4">
                     <div className="text-xs" style={{ color: adaptiveText.muted }}>
                       Peserta:
@@ -1308,11 +1309,15 @@ export default function GuestInvitationPage() {
               </div>
 
               <div className="p-5">
-                <div className="rounded-2xl bg-white p-3 flex justify-center">
+                <div className="rounded-2xl bg-white p-3 sm:p-4 flex justify-center">
                   {qrDataUrl ? (
-                    <img src={qrDataUrl} alt="QR Ticket" className="w-80 h-80" />
+                    <img
+                      src={qrDataUrl}
+                      alt="QR Ticket"
+                      className="w-full max-w-[280px] sm:max-w-[320px] aspect-square object-contain"
+                    />
                   ) : (
-                    <div className="w-60 h-60 flex items-center justify-center text-black/60">
+                    <div className="w-full max-w-[240px] aspect-square flex items-center justify-center text-black/60">
                       QR tidak tersedia
                     </div>
                   )}
@@ -1326,7 +1331,7 @@ export default function GuestInvitationPage() {
                 </div>
 
                 <div
-                  className="mt-6 rounded-2xl border p-6 flex items-center justify-between gap-3"
+                  className="mt-6 rounded-2xl border p-4 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
                   style={{
                     backgroundColor: adaptiveText.cardSoft,
                     borderColor: adaptiveText.cardBorder,
@@ -1337,7 +1342,7 @@ export default function GuestInvitationPage() {
                       Kode Undangan
                     </div>
                     <div
-                      className="font-mono text-lg"
+                      className="font-mono text-base sm:text-lg break-all"
                       style={{ color: adaptiveText.primary }}
                     >
                       {guest.unique_code}
@@ -1345,7 +1350,7 @@ export default function GuestInvitationPage() {
                   </div>
                   <ThemedButton
                     variant="outline"
-                    className="rounded-xl"
+                    className="rounded-xl w-full sm:w-auto justify-center"
                     backgroundColor={buttonPrimaryBg}
                     textColor={buttonPrimaryText}
                     onClick={copyCode}
@@ -1375,8 +1380,8 @@ export default function GuestInvitationPage() {
           color: adaptiveText.primary,
         }}
       >
-        <section className="mt-4 max-w-6xl mx-auto px-6 pb-4">
-          <div className="grid md:grid-cols-4 gap-4">
+        <section className="mt-4 max-w-6xl mx-auto px-4 sm:px-6 pb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
             <div
               className="rounded-2xl border p-5"
               style={{
@@ -1477,48 +1482,63 @@ export default function GuestInvitationPage() {
         </section>
 
         {!isVIP && agenda.length > 0 ? (
-          <section className="max-w-6xl mx-auto px-6 pt-12">
-            <div className="flex items-center justify-between gap-4">
-              <h2 className="text-2xl font-semibold" style={{ color: adaptiveText.primary }}>
-                Susunan Acara
-              </h2>
-            </div>
-
-            <div className="mt-6 space-y-3">
-              {agenda.map((a, idx) => (
-                <div
-                  key={idx}
-                  className="rounded-2xl border p-5 flex gap-4"
-                  style={{
-                    backgroundColor: cardColor,
-                    borderColor: adaptiveText.cardBorder,
-                  }}
-                >
-                  <div
-                    className="shrink-0 text-l font-mono px-16"
-                    style={{ color: adaptiveText.secondary }}
-                  >
-                    {a.start_time || a.time || "-"}
-                    {a.end_time ? ` - ${a.end_time}` : ""}
-                  </div>
-                  <div className="flex-1">
-                    <div className="font-semibold" style={{ color: adaptiveText.primary }}>
-                      {a.title}
-                    </div>
-                    {a.note ? (
-                      <div className="text-sm mt-1 pr-16" style={{ color: adaptiveText.muted }}>
-                        {a.note}
+          <section className="max-w-6xl mx-auto px-4 sm:px-6 pt-10 sm:pt-12">
+             <div className="flex items-center justify-between gap-4">
+               <h2 className="text-2xl font-semibold" style={{ color: adaptiveText.primary }}>
+                 Susunan Acara
+               </h2>
+             </div>
+             <div className="mt-6 space-y-3">
+               {agenda.map((a, idx) => (
+                 <div
+                   key={idx}
+                   className="rounded-2xl border p-4 sm:p-5 flex flex-col sm:flex-row gap-3 sm:gap-4"
+                   style={{
+                     backgroundColor: cardColor,
+                     borderColor: adaptiveText.cardBorder,
+                   }}
+                 >                             
+                  <div className="px-4 sm:px-6 md:px-8">
+                    <div className="grid grid-cols-[90px_1fr] sm:grid-cols-[110px_1fr] gap-3">
+                      
+                      {/* Kolom waktu */}
+                      <div
+                        className="text-sm sm:text-base font-mono"
+                        style={{ color: adaptiveText.secondary }}
+                      >
+                        {a.start_time || a.time || "-"}
+                        {a.end_time ? ` - ${a.end_time}` : ""}
                       </div>
-                    ) : null}
+
+                      {/* Kolom isi */}
+                      <div>
+                        <div
+                          className="font-semibold break-words"
+                          style={{ color: adaptiveText.primary }}
+                        >
+                          {a.title}
+                        </div>
+
+                        {a.note && (
+                          <div
+                            className="text-sm mt-1 leading-relaxed"
+                            style={{ color: adaptiveText.muted }}
+                          >
+                            {a.note}
+                          </div>
+                        )}
+                      </div>
+
+                    </div>
                   </div>
-                </div>
+                </div> 
               ))}
             </div>
           </section>
         ) : null}
 
         {!isVIP && faqs.length > 0 ? (
-          <section className="max-w-6xl mx-auto px-6 pt-12">
+          <section className="max-w-6xl mx-auto px-4 sm:px-6 pt-10 sm:pt-12">
             <h2 className="text-2xl font-semibold" style={{ color: adaptiveText.primary }}>
               Informasi Tambahan
             </h2>
@@ -1533,22 +1553,24 @@ export default function GuestInvitationPage() {
                     borderColor: adaptiveText.cardBorder,
                   }}
                 >
-                  <div className="font-semibold px-16" style={{ color: adaptiveText.primary }}>
-                    {f.q}
+                <div className="px-4 sm:px-6 md:px-8">  
+                  <div className="font-semibold break-words" style={{ color: adaptiveText.primary }}>
+                    <div className="mt-1 font-medium">{f.q}</div>
                   </div>
                   <div
-                    className="mt-2 leading-relaxed px-20"
+                    className="mt-2 leading-relaxed"
                     style={{ color: adaptiveText.muted }}
                   >
-                    {f.a}
+                    <div className="mt-1 break-words">{f.a}</div>
                   </div>
                 </div>
-              ))}
+              </div>
+            ))}
             </div>
           </section>
         ) : null}
 
-        <section className="max-w-6xl mx-auto px-6 py-16">
+        <section className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-16">
           <div
             className="rounded-3xl border p-8 text-center"
             style={{
@@ -1558,7 +1580,7 @@ export default function GuestInvitationPage() {
           >
             <div className="inline-flex items-center" style={{ color: adaptiveText.secondary }}>
               {brand.logoUrl ? (
-                <img src={brand.logoUrl} alt="Logo" className="h-25" />
+                <img src={brand.logoUrl} alt="Logo" className="w-auto object-contain" style={{ height: 72, maxWidth: "180px" }} />
               ) : (
                 <span>
                   <CheckCheck className="w-5 h-5" style={{ color: effectiveAccent }} />
@@ -1591,7 +1613,7 @@ export default function GuestInvitationPage() {
         </section>
 
         {err ? (
-          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50">
+          <div className="fixed bottom-4 left-4 right-4 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-50">
             <div className="rounded-xl border border-red-300/30 bg-red-500/15 px-4 py-3 text-sm text-red-200 backdrop-blur">
               {err}
             </div>
