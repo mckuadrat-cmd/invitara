@@ -1038,30 +1038,32 @@ export default function GuestInvitationPage() {
         <div className="relative max-w-6xl mx-auto px-4 sm:px-6 pt-20 sm:pt-24 pb-12 sm:pb-16">
           <div className="mt-10 sm:mt-14 grid lg:grid-cols-[1.1fr_0.9fr] gap-6 sm:gap-8 items-start">
             <div>
-              <div className="flex items-center gap-3 flex-wrap">
-                <div
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full border text-sm tracking-[0.18em] uppercase"
-                  style={{
-                    backgroundColor: cardColor,
-                    borderColor: adaptiveText.border,
-                    color: adaptiveText.secondary,
-                  }}
-                >
-                  <Sparkles className="w-4 h-4" />
-                  {effectiveTagline}
-                </div>
+<div className="flex items-center gap-3">
+  <ThemedButton
+    onClick={copyLink}
+    variant="outline"
+    className="h-11 w-11 shrink-0 rounded-xl overflow-hidden bg-transparent"
+    backgroundColor={shareButtonBg}
+    textColor={shareButtonText}
+    hoverColor={darkenHex(pageBaseColor, 0.08)}
+  >
+    <Share2 className="m-1 h-4 w-4" />
+  </ThemedButton>
 
-                <ThemedButton
-                  onClick={copyLink}
-                  variant="outline"
-                  className="h-11 rounded-xl overflow-hidden bg-transparent"
-                  backgroundColor={shareButtonBg}
-                  textColor={shareButtonText}
-                  hoverColor={darkenHex(pageBaseColor, 0.08)}
-                >
-                  <Share2 className="m-1 h-4 w-4" />
-                </ThemedButton>
-              </div>
+  <div className="min-w-0 flex-1">
+    <div
+      className="inline-flex max-w-full items-center gap-2 px-4 py-2 rounded-full border text-sm tracking-[0.18em] uppercase break-words"
+      style={{
+        backgroundColor: cardColor,
+        borderColor: adaptiveText.border,
+        color: adaptiveText.secondary,
+      }}
+    >
+      <Sparkles className="w-4 h-4 shrink-0" />
+      <span className="min-w-0 break-words">{effectiveTagline}</span>
+    </div>
+  </div>
+</div>
 
               <div className="mt-4 flex items-center gap-5">
                 <h1
@@ -1179,22 +1181,26 @@ export default function GuestInvitationPage() {
                 </span>
               </div>
 
-              {guest.organization ? (
-                <div
-                  className="mt-3 inline-flex items-center gap-2"
-                  style={{ color: adaptiveText.secondary }}
-                >
-                  <Building2 className="w-4 h-4" style={{ color: effectiveAccent }} />
-                  {guest.organization}
-                  {guest.dept_class && (
-                    <>
-                      {" "}
-                      • <BoxIcon className="w-4 h-4" style={{ color: effectiveAccent }} />{" "}
-                      {guest.dept_class}
-                    </>
-                  )}
-                </div>
-              ) : null}
+{guest.organization ? (
+  <div
+    className="mt-3 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3"
+    style={{ color: adaptiveText.secondary }}
+  >
+    {/* Organization */}
+    <div className="flex items-center gap-2">
+      <Building2 className="w-4 h-4 shrink-0" style={{ color: effectiveAccent }} />
+      <span>{guest.organization}</span>
+    </div>
+
+    {/* Dept / Class */}
+    {guest.dept_class && (
+      <div className="flex items-center gap-2">
+        <BoxIcon className="w-4 h-4 shrink-0" style={{ color: effectiveAccent }} />
+        <span>{guest.dept_class}</span>
+      </div>
+    )}
+  </div>
+) : null}
 
               <p className="mt-8 text-md" style={{ color: adaptiveText.primary }}>
                 {salam} {greetingByHour()},
