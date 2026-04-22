@@ -1603,23 +1603,43 @@ export default function SettingsPage() {
                           />
                         </div>
 
-                        <div className="md:col-span-4">
+                        <div className="md:col-span-3">
                           <Label className="text-xs">Title</Label>
-                          <Input
+                          <Textarea
                             value={it.title}
-                            onChange={(e) => updateAgenda(idx, { title: e.target.value })}
+                            onChange={(e) => {
+                              updateAgenda(idx, { title: e.target.value });
+                              e.currentTarget.style.height = "auto";
+                              e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
+                            }}
+                            onInput={(e) => {
+                              e.currentTarget.style.height = "auto";
+                              e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
+                            }}
                             placeholder="Registrasi"
                             disabled={loading}
+                            rows={1}
+                            className="min-h-[40px] resize-none overflow-hidden"
                           />
                         </div>
 
-                        <div className="md:col-span-4">
+                        <div className="md:col-span-5">
                           <Label className="text-xs">Note (optional)</Label>
-                          <Input
+                          <Textarea
                             value={it.note ?? ""}
-                            onChange={(e) => updateAgenda(idx, { note: e.target.value })}
+                            onChange={(e) => {
+                              updateAgenda(idx, { note: e.target.value });
+                              e.currentTarget.style.height = "auto";
+                              e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
+                            }}
+                            onInput={(e) => {
+                              e.currentTarget.style.height = "auto";
+                              e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
+                            }}
                             placeholder="Keterangan kecil"
                             disabled={loading}
+                            rows={1}
+                            className="min-h-[40px] resize-none overflow-hidden"
                           />
                         </div>
                       </div>
@@ -1693,23 +1713,28 @@ export default function SettingsPage() {
                       key={idx}
                       className="rounded-lg border border-gray-200 bg-[#F5F7FA] p-4"
                     >
-                      <div className="grid md:grid-cols-12 gap-3">
-                        <div className="md:col-span-5">
+                      <div className="space-y-3">
+                        <div>
                           <Label className="text-xs">Question</Label>
-                          <Input
+                          <Textarea
                             value={it.q}
                             onChange={(e) => updateFaq(idx, { q: e.target.value })}
-                            placeholder="Dresscode?"
+                            placeholder="Contoh: Dresscode?"
                             disabled={loading}
+                            rows={1}
+                            className="min-h-[40px] resize-none overflow-hidden"
                           />
                         </div>
-                        <div className="md:col-span-7">
+
+                        <div>
                           <Label className="text-xs">Answer</Label>
-                          <Input
+                          <Textarea
                             value={it.a}
                             onChange={(e) => updateFaq(idx, { a: e.target.value })}
-                            placeholder="Formal / Batik"
+                            placeholder="Contoh: Formal / Batik"
                             disabled={loading}
+                            rows={1}
+                            className="min-h-[40px] resize-none overflow-hidden"
                           />
                         </div>
                       </div>

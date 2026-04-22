@@ -14,6 +14,7 @@ import {
   MapPinHouse,
   CheckCheck,
   BoxIcon,
+  ArrowUp,
 } from "lucide-react";
 
 import { supabase } from "../lib/supabaseClient";
@@ -426,6 +427,7 @@ export default function GuestInvitationPage() {
   const pollingRef = useRef<number | null>(null);
   const isFetchingRef = useRef(false);
   const lastFetchAtRef = useRef(0);
+  const [showScrollTop, setShowScrollTop] = useState(false);
 
   async function loadInvitation(showLoading = true) {
     if (!guestCode) {
@@ -654,6 +656,22 @@ export default function GuestInvitationPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [guestCode]);
+
+  function scrollToTop() {
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  }
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowScrollTop(window.scrollY > 200);
+    };
+
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
 
   const theme = useMemo(() => event?.theme ?? {}, [event]);
   const brand = useMemo(() => theme.brand ?? theme ?? {}, [theme]);
@@ -992,6 +1010,20 @@ export default function GuestInvitationPage() {
         className="relative overflow-hidden"
         style={{ minHeight: `max(${heroHeight}px, 70vh)` }}
       >
+
+        {/* FLOATING LOGO */}
+        {brand.logoUrl && (
+          <div className="fixed top-10 left-12 md:top-12 md:left-18 z-50">
+            <div className="rounded-xl bg-white backdrop-blur-md px-3 py-2 shadow-lg">
+              <img
+                src={brand.logoUrl}
+                alt="Event Logo"
+                className="h-15 md:h-15 w-auto object-contain"
+              />
+            </div>
+          </div>
+        )}
+        
         <div
           className="absolute inset-0"
           style={{
@@ -1031,18 +1063,8 @@ export default function GuestInvitationPage() {
               </div>
 
               <div className="mt-4 flex items-center gap-5">
-                {brand.logoUrl && (
-                  <div className="bg-white/5 backdrop-blur-md p-1 px-4 object-cover rounded-xl border border-white/10">
-                    <img
-                      src={brand.logoUrl}
-                      alt="Logo"
-                      className="h-30 md:h-30 w-auto object-contain"
-                    />
-                  </div>
-                )}
-
                 <h1
-                  className="text-4xl md:text-5xl font-semibold tracking-tight leading-tight"
+                  className="text-4xl md:text-5xl font-semibold tracking-tight leading-[1.1]"
                   style={{ color: adaptiveText.primary }}
                 >
                   {headline}
@@ -1473,7 +1495,7 @@ export default function GuestInvitationPage() {
                   }}
                 >
                   <div
-                    className="shrink-0 w-36 text-sm font-mono"
+                    className="shrink-0 text-l font-mono px-16"
                     style={{ color: adaptiveText.secondary }}
                   >
                     {a.start_time || a.time || "-"}
@@ -1484,7 +1506,7 @@ export default function GuestInvitationPage() {
                       {a.title}
                     </div>
                     {a.note ? (
-                      <div className="text-sm mt-1" style={{ color: adaptiveText.muted }}>
+                      <div className="text-sm mt-1 pr-16" style={{ color: adaptiveText.muted }}>
                         {a.note}
                       </div>
                     ) : null}
@@ -1511,12 +1533,12 @@ export default function GuestInvitationPage() {
                     borderColor: adaptiveText.cardBorder,
                   }}
                 >
-                  <div className="font-semibold" style={{ color: adaptiveText.primary }}>
+                  <div className="font-semibold px-16" style={{ color: adaptiveText.primary }}>
                     {f.q}
                   </div>
                   <div
-                    className="mt-2 leading-relaxed"
-                    style={{ color: adaptiveText.secondary }}
+                    className="mt-2 leading-relaxed px-20"
+                    style={{ color: adaptiveText.muted }}
                   >
                     {f.a}
                   </div>
@@ -1546,7 +1568,7 @@ export default function GuestInvitationPage() {
 
             <div
               className="mt-6 leading-relaxed max-w-2xl mx-auto"
-              style={{ color: adaptiveText.secondary }}
+              style={{ color: adaptiveText.muted }}
             >
               {closingText}
             </div>
@@ -1576,6 +1598,15 @@ export default function GuestInvitationPage() {
           </div>
         ) : null}
       </div>
+
+      {showScrollTop && (
+        <button
+          onClick={scrollToTop}
+          className="fixed bottom-6 right-4 md:right-6 z-50 h-12 w-12 rounded-full bg-white/90 backdrop-blur shadow-lg flex items-center justify-center hover:scale-105 transition-all duration-200"
+        >
+          <ArrowUp className="w-5 h-5 text-[#0F1C2E]" />
+        </button>
+      )}
     </div>
   );
 }
