@@ -20,6 +20,9 @@ import {
   Image as ImageIcon,
   CheckCircle2,
   Loader2,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import { Input } from "../../components/ui/input";
 import { Button } from "../../components/ui/button";
@@ -201,6 +204,77 @@ export default function GuestListPage() {
   const [guests, setGuests] = useState<GuestRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+
+  const [sortConfig, setSortConfig] = useState<{
+    key: keyof GuestRow;
+    direction: "asc" | "desc";
+  } | null>(null);
+
+  const sortedGuests = useMemo(() => {
+    // 👉 DEFAULT (belum klik header)
+    if (!sortConfig) {
+      return [...guests].sort((a, b) => {
+        // PRIORITAS: checkin_time → created_at → id
+        const dateA = new Date(a.checkin_time || 0).getTime();
+        const dateB = new Date(b.checkin_time || 0).getTime();
+
+        return dateB - dateA;
+      });
+    }
+
+    // 👉 SORT BY HEADER
+    const sorted = [...guests].sort((a, b) => {
+      const aVal = a[sortConfig.key];
+      const bVal = b[sortConfig.key];
+
+      if (aVal == null) return 1;
+      if (bVal == null) return -1;
+
+      if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
+      if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
+      return 0;
+    });
+
+    return sorted;
+  }, [guests, sortConfig]);
+
+  const handleSort = (key: keyof GuestRow) => {
+    setSortConfig((prev) => {
+      if (prev?.key === key) {
+        return {
+          key,
+          direction: prev.direction === "asc" ? "desc" : "asc",
+        };
+      }
+      return { key, direction: "asc" };
+    });
+  };
+
+  function getSortableValue(guest: GuestRow, key: keyof GuestRow) {
+    const value = guest[key];
+
+    if (key === "created_at" || key === "checkin_time") {
+      return value ? new Date(value as string).getTime() : 0;
+    }
+
+    if (typeof value === "string") {
+      return value.toLowerCase();
+    }
+
+    return value ?? "";
+  }
+
+  const renderSortIcon = (key: keyof GuestRow) => {
+    if (sortConfig?.key !== key) {
+      return <ArrowUpDown className="ml-1 inline h-4 w-4" />;
+    }
+
+    return sortConfig.direction === "asc" ? (
+      <ArrowUp className="ml-1 inline h-4 w-4" />
+    ) : (
+      <ArrowDown className="ml-1 inline h-4 w-4" />
+    );
+  };
 
   // Manual add
   const [adding, setAdding] = useState(false);
@@ -633,8 +707,8 @@ export default function GuestListPage() {
 
   const paginatedGuests = useMemo(() => {
     const start = (page - 1) * pageSize;
-    return filteredGuests.slice(start, start + pageSize);
-  }, [filteredGuests, page, pageSize]);
+    return sortedGuests.slice(start, start + pageSize);
+  }, [sortedGuests, page, pageSize]);
 
   useEffect(() => {
     if (page > totalPages) {
@@ -670,7 +744,7 @@ export default function GuestListPage() {
 
   const exportToCSV = () => {
     const headers = [
-      "No Identity",
+      "identity_no",
       "full_name",
       "email",
       "phone",
@@ -1496,17 +1570,54 @@ export default function GuestListPage() {
             <Table className="w-full table-fixed">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[110px] text-[#0F1C2E]">No Identity</TableHead>
-                  <TableHead className="w-[150px] text-[#0F1C2E]">Name</TableHead>
+                  <TableHead
+                    onClick={() => handleSort("identity_no")}
+                    className="w-[110px] cursor-pointer select-none text-[#0F1C2E]"
+                  >
+                    No Identity {renderSortIcon("identity_no")}
+                  </TableHead>
+                  <TableHead
+                    onClick={() => handleSort("full_name")}
+                    className="w-[150px] cursor-pointer select-none text-[#0F1C2E]"
+                  >
+                    Name {renderSortIcon("full_name")}
+                  </TableHead>
                   <TableHead className="w-[90px] text-[#0F1C2E]">Email</TableHead>
                   <TableHead className="w-[100px] text-[#0F1C2E]">Phone</TableHead>
                   <TableHead className="w-[140px] text-[#0F1C2E]">Organization</TableHead>
-                  <TableHead className="w-[110px] text-[#0F1C2E]">Dept/Class</TableHead>
-                  <TableHead className="w-[130px] text-[#0F1C2E]">Unique Code</TableHead>
+                  <TableHead
+                    onClick={() => handleSort("dept_class")}
+                    className="w-[110px] cursor-pointer select-none text-[#0F1C2E]"
+                  >
+                    Dept/Class {renderSortIcon("dept_class")}
+                  </TableHead>
+                  <TableHead
+                    onClick={() => handleSort("unique_code")}
+                    className="w-[130px] cursor-pointer select-none text-[#0F1C2E]"
+                  >
+                    Unique Code {renderSortIcon("unique_code")}
+                  </TableHead>
                   <TableHead className="w-[70px] text-center text-[#0F1C2E]">Photo</TableHead>
-                  <TableHead className="w-[120px] text-[#0F1C2E]">Status</TableHead>
-                  <TableHead className="w-[90px] text-[#0F1C2E]">Type</TableHead>
-                  <TableHead className="w-[120px] text-[#0F1C2E]">Check-in</TableHead>
+                  <TableHead
+                    onClick={() => handleSort("status")}
+                    className="w-[120px] cursor-pointer select-none text-[#0F1C2E]"
+                  >
+                    Status {renderSortIcon("status")}
+                  </TableHead>
+
+                  <TableHead
+                    onClick={() => handleSort("guest_type")}
+                    className="w-[90px] cursor-pointer select-none text-[#0F1C2E]"
+                  >
+                    Type {renderSortIcon("guest_type")}
+                  </TableHead>
+
+                  <TableHead
+                    onClick={() => handleSort("checkin_time")}
+                    className="w-[120px] cursor-pointer select-none text-[#0F1C2E]"
+                  >
+                    Check-in {renderSortIcon("checkin_time")}
+                  </TableHead>
                   <TableHead className="w-[150px] text-center text-[#0F1C2E]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
