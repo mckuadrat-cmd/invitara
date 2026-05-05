@@ -1131,44 +1131,67 @@ export default function GuestListPage() {
     try {
       setErr(null);
       setDownloadingAllPdf(true);
-      toast.loading("Sedang menyiapkan ZIP e-ticket...", { id: "zip-pdf" });
 
       const confirmedGuests = filteredGuests.filter(
         (g) => g.status === "confirmed" || g.status === "checked_in"
       );
 
       if (confirmedGuests.length === 0) {
-        toast.error("Tidak ada guest yang sudah konfirmasi untuk didownload.", {
-          id: "zip-pdf",
-        });
+        toast.error("Tidak ada guest yang sudah konfirmasi untuk didownload.");
         return;
       }
 
-      const zip = new JSZip();
+      const BATCH_SIZE = 25;
+      const totalBatch = Math.ceil(confirmedGuests.length / BATCH_SIZE);
 
-      for (const guest of confirmedGuests) {
-        const pdfBlob = await generateGuestTicketPdf({
-          guest,
-          event,
-          buildQrPayload: () => buildQrPayloadForGuest(guest),
-          autoDownload: false,
-        });
+      toast.loading(`Menyiapkan ${confirmedGuests.length} tiket...`, {
+        id: "zip-pdf",
+      });
 
-        if (pdfBlob) {
-          zip.file(`e-ticket-${guest.unique_code}-${guest.full_name.replace(/\s/g, '-')}.pdf`, pdfBlob);
+      for (let batchIndex = 0; batchIndex < totalBatch; batchIndex++) {
+        const batch = confirmedGuests.slice(
+          batchIndex * BATCH_SIZE,
+          (batchIndex + 1) * BATCH_SIZE
+        );
+
+        const zip = new JSZip();
+
+        for (let i = 0; i < batch.length; i++) {
+          const guest = batch[i];
+
+          toast.loading(
+            `Batch ${batchIndex + 1}/${totalBatch} - tiket ${i + 1}/${batch.length}`,
+            { id: "zip-pdf" }
+          );
+
+          const pdfBlob = await generateGuestTicketPdf({
+            guest,
+            event,
+            buildQrPayload: () => buildQrPayloadForGuest(guest),
+            autoDownload: false,
+          });
+
+          if (pdfBlob) {
+            zip.file(
+              `e-ticket-${guest.unique_code}-${guest.full_name.replace(/[\\/:*?"<>|]/g, "").replace(/\s+/g, "-")}.pdf`,
+              pdfBlob
+            );
+          }
+
+          await sleep(80);
         }
 
-        await sleep(120);
+        const zipBlob = await zip.generateAsync({ type: "blob" });
+
+        saveAs(
+          zipBlob,
+          `e-ticket-${event.event_code ?? event.name ?? "event"}-batch-${batchIndex + 1}-of-${totalBatch}.zip`
+        );
+
+        await sleep(700);
       }
 
-      const zipBlob = await zip.generateAsync({ type: "blob" });
-
-      saveAs(
-        zipBlob,
-        `e-ticket-${event.event_code ?? event.name ?? "event"}-${confirmedGuests.length}.zip`
-      );
-
-      toast.success(`ZIP berhasil dibuat (${confirmedGuests.length} file).`, {
+      toast.success(`Selesai. ${totalBatch} ZIP berhasil dibuat.`, {
         id: "zip-pdf",
       });
     } catch (e: any) {

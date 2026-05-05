@@ -1,8 +1,6 @@
 import jsPDF from "jspdf";
 import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
-import { title } from "process";
-import { time } from "console";
 
 type GuestRow = {
   id: string;
