@@ -357,6 +357,83 @@ export default function GuestListPage() {
     }
   }
 
+  async function uploadGuestPhotoFolder(files: File[]) {
+    if (!event?.event_code) {
+      setErr("event_code belum ada di event ini.");
+      return;
+    }
+
+    try {
+      setErr(null);
+      setUploadingZip(true);
+
+      toast.loading("Sedang upload folder foto...", { id: "folder-photo" });
+
+      let success = 0;
+      let failed = 0;
+      let notMatched = 0;
+      let skipped = 0;
+
+      const guestMap = new Map(
+        guests.map((g) => [String(g.unique_code).trim().toUpperCase(), g])
+      );
+
+      for (const file of files) {
+        const base = file.name || "";
+        const isImage = /\.(jpg|jpeg|png|webp)$/i.test(base);
+
+        if (!isImage) {
+          skipped++;
+          continue;
+        }
+
+        const code = base.replace(/\.[^.]+$/, "").trim().toUpperCase();
+        const guest = guestMap.get(code);
+
+        if (!guest) {
+          notMatched++;
+          continue;
+        }
+
+        try {
+          const jpgFile = await convertImageToJpg(file);
+          const filePath = `${event.event_code}/${guest.unique_code}.jpg`;
+
+          const { error: uploadError } = await supabase.storage
+            .from("guest-photos")
+            .upload(filePath, jpgFile, { upsert: true });
+
+          if (uploadError) throw uploadError;
+
+          const photoUrl = buildGuestPhotoUrl(event.event_code, guest.unique_code);
+
+          const { error: dbError } = await supabase
+            .from("guests")
+            .update({ photo_url: photoUrl })
+            .eq("id", guest.id);
+
+          if (dbError) throw dbError;
+
+          success++;
+        } catch {
+          failed++;
+        }
+      }
+
+      await loadGuests();
+
+      toast.success(
+        `Upload selesai. Success: ${success}, Failed: ${failed}, Not matched: ${notMatched}, Skipped: ${skipped}`,
+        { id: "folder-photo" }
+      );
+    } catch (e: any) {
+      setErr(e?.message ?? "Gagal upload folder foto.");
+      toast.error(e?.message ?? "Gagal upload folder foto.", { id: "folder-photo" });
+    } finally {
+      setUploadingZip(false);
+    }
+  }
+
   async function uploadGuestZip(file: File) {
     if (!event?.event_code) {
       setErr("event_code belum ada di event ini.");
@@ -1298,10 +1375,16 @@ export default function GuestListPage() {
               className="hidden"
               disabled={loading}
               onChange={async (e) => {
-                const f = e.target.files?.[0];
+                const input = e.currentTarget;
+                const f = input.files?.[0];
+
                 if (!f) return;
-                await importCsv(f);
-                e.currentTarget.value = "";
+
+                try {
+                  await importCsv(f);
+                } finally {
+                  input.value = "";
+                }
               }}
             />
 
@@ -1320,13 +1403,21 @@ export default function GuestListPage() {
           <input
             ref={zipInputRef}
             type="file"
-            accept=".zip"
             className="hidden"
+            multiple
+            // @ts-ignore
+            webkitdirectory="true"
             onChange={async (e) => {
-              const file = e.target.files?.[0];
-              if (!file) return;
-              await uploadGuestZip(file);
-              e.currentTarget.value = "";
+              const input = e.currentTarget;
+              const files = Array.from(input.files ?? []);
+
+              if (files.length === 0) return;
+
+              try {
+                await uploadGuestPhotoFolder(files);
+              } finally {
+                input.value = "";
+              }
             }}
           />
 
