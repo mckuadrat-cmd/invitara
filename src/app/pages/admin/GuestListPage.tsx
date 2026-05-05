@@ -295,7 +295,9 @@ export default function GuestListPage() {
   const [pageSize, setPageSize] = useState(10);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [confirmMode, setConfirmMode] = useState<"one" | "all" | "confirm_all" | "unconfirm_all">("one");
+  const [confirmMode, setConfirmMode] = useState<
+      "one" | "all" | "confirm_all" | "unconfirm_all" | "delete_all_photos"
+    >("one");
   const [targetGuest, setTargetGuest] = useState<GuestRow | null>(null);
 
   // Email sending state
@@ -442,6 +444,92 @@ export default function GuestListPage() {
     }
   }
 
+  async function deleteGuestPhoto(guest: GuestRow) {
+    if (!event?.event_code) {
+      setErr("event_code belum ada di event ini.");
+      return;
+    }
+
+    try {
+      setErr(null);
+      setUploadingPhotoId(guest.id);
+
+      const filePath = `${event.event_code}/${guest.unique_code}.jpg`;
+
+      await supabase.storage
+        .from("guest-photos")
+        .remove([filePath]);
+
+      const { error: dbError } = await supabase
+        .from("guests")
+        .update({ photo_url: null })
+        .eq("id", guest.id);
+
+      if (dbError) throw dbError;
+
+      setGuests((prev) =>
+        prev.map((x) =>
+          x.id === guest.id ? { ...x, photo_url: null } : x
+        )
+      );
+
+      setPhotoDeleteOpen(false);
+      setTargetPhotoGuest(null);
+      toast.success("Foto berhasil dihapus.");
+    } catch (e: any) {
+      setErr(e?.message ?? "Gagal hapus foto.");
+    } finally {
+      setUploadingPhotoId(null);
+    }
+  }
+
+  async function deleteAllGuestPhotos() {
+    if (!event?.event_code) {
+      setErr("event_code belum ada di event ini.");
+      return;
+    }
+
+    const targets = guests.filter((g) => !!g.photo_url);
+
+    if (targets.length === 0) {
+      toast.info("Tidak ada foto yang perlu dihapus.");
+      setConfirmOpen(false);
+      return;
+    }
+
+    try {
+      setErr(null);
+      setUploadingZip(true);
+
+      const paths = targets.map(
+        (g) => `${event.event_code}/${g.unique_code}.jpg`
+      );
+
+      const { error: removeError } = await supabase.storage
+        .from("guest-photos")
+        .remove(paths);
+
+      if (removeError) throw removeError;
+
+      const { error: dbError } = await supabase
+        .from("guests")
+        .update({ photo_url: null })
+        .eq("event_id", eventId)
+        .not("photo_url", "is", null);
+
+      if (dbError) throw dbError;
+
+      setGuests((prev) => prev.map((g) => ({ ...g, photo_url: null })));
+
+      setConfirmOpen(false);
+      toast.success(`${targets.length} foto berhasil dihapus.`);
+    } catch (e: any) {
+      setErr(e?.message ?? "Gagal hapus semua foto.");
+    } finally {
+      setUploadingZip(false);
+    }
+  }
+
   function openTicket(uniqueCode: string) {
     window.open(`/u/${encodeURIComponent(uniqueCode)}`, "_blank");
   }
@@ -489,6 +577,11 @@ export default function GuestListPage() {
 
       if (confirmMode === "unconfirm_all") {
         await unconfirmAllGuests();
+        return;
+      }
+
+      if (confirmMode === "delete_all_photos") {
+        await deleteAllGuestPhotos();
         return;
       }
     } catch (e: any) {
@@ -1089,6 +1182,12 @@ export default function GuestListPage() {
   const hasRegisteredGuests = guests.some((g) => g.status === "registered");
   const hasConfirmedGuests = guests.some((g) => g.status === "confirmed");
 
+  const [photoDeleteOpen, setPhotoDeleteOpen] = useState(false);
+  const [targetPhotoGuest, setTargetPhotoGuest] = useState<GuestRow | null>(null);
+
+  const guestsWithPhoto = guests.filter((g) => !!g.photo_url);
+  const hasAnyPhoto = guestsWithPhoto.length > 0;
+
   const bulkConfirmAction =
     hasRegisteredGuests ? "confirm_all" : hasConfirmedGuests ? "unconfirm_all" : null;
 
@@ -1234,13 +1333,36 @@ export default function GuestListPage() {
           <Button
             type="button"
             variant="outline"
-            className="border-[#0F1C2E]/20"
+            className={
+              hasAnyPhoto
+                ? "border-red-200 text-red-700 hover:bg-red-50"
+                : "border-[#0F1C2E]/20"
+            }
             disabled={loading || uploadingZip || !event?.event_code || guests.length === 0}
-            onClick={() => zipInputRef.current?.click()}
-            title={!event?.event_code ? "event_code belum ada" : "Upload photos"}
+            onClick={() => {
+              if (hasAnyPhoto) {
+                setConfirmMode("delete_all_photos" as any);
+                setTargetGuest(null);
+                setConfirmOpen(true);
+              } else {
+                zipInputRef.current?.click();
+              }
+            }}
+            title={
+              !event?.event_code
+                ? "event_code belum ada"
+                : hasAnyPhoto
+                ? `Hapus ${guestsWithPhoto.length} foto`
+                : "Upload photos"
+            }
           >
-            <Upload className="w-4 h-4 mr-2" />
-            {uploadingZip ? "Uploading..." : "Upload Photos"}
+            {hasAnyPhoto ? (
+              <Trash2 className="w-4 h-4 mr-2" />
+            ) : (
+              <Upload className="w-4 h-4 mr-2" />
+            )}
+
+            {hasAnyPhoto ? `Delete Photos (${guestsWithPhoto.length})` : uploadingZip ? "Uploading..." : "Upload Photos"}
           </Button>
 
           <Button
@@ -1323,7 +1445,9 @@ export default function GuestListPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {confirmMode === "all"
+              {confirmMode === "delete_all_photos"
+                ? "Delete all guest photos?"
+                : confirmMode === "all"
                 ? "Delete all guests?"
                 : confirmMode === "confirm_all"
                 ? "Confirm all guests?"
@@ -1334,23 +1458,33 @@ export default function GuestListPage() {
           </DialogHeader>
 
           <div className="text-sm text-gray-600">
-            {confirmMode === "all" ? (
+            {confirmMode === "delete_all_photos" ? (
               <>
-                Ini akan menghapus <b>SEMUA</b> guest untuk event ini. Aksi ini tidak bisa dibatalkan.
+                Ini akan menghapus <b>{guestsWithPhoto.length}</b> foto guest dari
+                Storage dan mengosongkan kolom <b>photo_url</b> di database.
+                Aksi ini tidak bisa dibatalkan.
+              </>
+            ) : confirmMode === "all" ? (
+              <>
+                Ini akan menghapus <b>SEMUA</b> guest untuk event ini. Aksi ini tidak
+                bisa dibatalkan.
               </>
             ) : confirmMode === "confirm_all" ? (
               <>
-                Ini akan mengubah semua guest dengan status <b>registered</b> menjadi <b>confirmed</b>.
-                Guest yang sudah <b>confirmed</b> atau <b>checked_in</b> tidak akan berubah.
+                Ini akan mengubah semua guest dengan status <b>registered</b> menjadi{" "}
+                <b>confirmed</b>. Guest yang sudah <b>confirmed</b> atau{" "}
+                <b>checked_in</b> tidak akan berubah.
               </>
             ) : confirmMode === "unconfirm_all" ? (
               <>
-                Ini akan mengubah semua guest dengan status <b>confirmed</b> menjadi <b>registered</b>.
-                Guest yang sudah <b>checked_in</b> tidak akan berubah.
+                Ini akan mengubah semua guest dengan status <b>confirmed</b> menjadi{" "}
+                <b>registered</b>. Guest yang sudah <b>checked_in</b> tidak akan
+                berubah.
               </>
             ) : (
               <>
-                Hapus guest: <b>{targetGuest?.full_name}</b>? Aksi ini tidak bisa dibatalkan.
+                Hapus guest: <b>{targetGuest?.full_name}</b>? Aksi ini tidak bisa
+                dibatalkan.
               </>
             )}
           </div>
@@ -1359,6 +1493,7 @@ export default function GuestListPage() {
             <Button variant="outline" onClick={() => setConfirmOpen(false)}>
               Cancel
             </Button>
+
             <Button
               className={
                 confirmMode === "confirm_all" || confirmMode === "unconfirm_all"
@@ -1366,9 +1501,13 @@ export default function GuestListPage() {
                   : "bg-red-600 hover:bg-red-700 text-white"
               }
               onClick={runConfirmedAction}
-              disabled={deletingAll || confirmingAll}
+              disabled={deletingAll || confirmingAll || uploadingZip}
             >
-              {confirmMode === "confirm_all"
+              {confirmMode === "delete_all_photos"
+                ? uploadingZip
+                  ? "Deleting Photos..."
+                  : `Delete Photos (${guestsWithPhoto.length})`
+                : confirmMode === "confirm_all"
                 ? confirmingAll
                   ? "Confirming..."
                   : "Confirm All"
@@ -1376,7 +1515,36 @@ export default function GuestListPage() {
                 ? confirmingAll
                   ? "Unconfirming..."
                   : "Unconfirm All"
+                : deletingAll
+                ? "Deleting..."
                 : "Delete"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={photoDeleteOpen} onOpenChange={setPhotoDeleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Hapus foto?</DialogTitle>
+          </DialogHeader>
+
+          <div className="text-sm text-gray-600">
+            Foto milik <b>{targetPhotoGuest?.full_name}</b> akan dihapus dari Storage
+            dan database.
+          </div>
+
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setPhotoDeleteOpen(false)}>
+              Batal
+            </Button>
+
+            <Button
+              className="bg-red-600 hover:bg-red-700 text-white"
+              disabled={!targetPhotoGuest || uploadingPhotoId === targetPhotoGuest?.id}
+              onClick={() => targetPhotoGuest && deleteGuestPhoto(targetPhotoGuest)}
+            >
+              {uploadingPhotoId === targetPhotoGuest?.id ? "Menghapus..." : "Hapus Foto"}
             </Button>
           </div>
         </DialogContent>
@@ -1703,23 +1871,34 @@ export default function GuestListPage() {
                                 <Button
                                   size="sm"
                                   variant="outline"
+                                  className="group border-green-200 hover:border-red-200 hover:bg-red-50"
+                                  title="Klik untuk hapus foto"
+                                  disabled={uploadingPhotoId === g.id}
+                                  onClick={() => {
+                                    setTargetPhotoGuest(g);
+                                    setPhotoDeleteOpen(true);
+                                  }}
+                                >
+                                  {uploadingPhotoId === g.id ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <>
+                                      <CheckCircle2 className="w-5 h-5 text-green-600 group-hover:hidden" />
+                                      <X className="w-5 h-5 text-red-600 hidden group-hover:block" />
+                                    </>
+                                  )}
+                                </Button>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
                                   className="border-[#0F1C2E]/20"
-                                  title="Foto sudah ada - klik untuk ganti"
+                                  title="Upload foto"
                                   onClick={() => photoInputRefs.current[g.id]?.click()}
                                 >
-                                  <CheckCircle2 className="w-5 h-5 text-green-600" />
+                                  <Upload className="w-4 h-4 text-[#0F1C2E]" />
                                 </Button>
-                          ) : (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="border-[#0F1C2E]/20"
-                              title="Upload foto"
-                              onClick={() => photoInputRefs.current[g.id]?.click()}
-                            >
-                              <Upload className="w-4 h-4 text-[#0F1C2E]" />
-                            </Button>
-                          )}
+                              )}
                         </TableCell>
 
                         <TableCell>
