@@ -152,16 +152,87 @@ function formatTimeEnd(iso: string | null) {
   }
 }
 
-async function urlToDataUrl(url: string): Promise<string> {
-  const response = await fetch(url);
-  const blob = await response.blob();
-
+async function blobToDataUrl(blob: Blob): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => resolve(String(reader.result));
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+}
+
+async function loadImageFromBlob(blob: Blob): Promise<HTMLImageElement> {
+  return await new Promise((resolve, reject) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(blob);
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(img);
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Gagal membaca gambar"));
+    };
+
+    img.src = objectUrl;
+  });
+}
+
+async function urlToDataUrl(url: string): Promise<string> {
+  const response = await fetch(url);
+  const blob = await response.blob();
+  return await blobToDataUrl(blob);
+}
+
+async function urlToOptimizedImageDataUrl(
+  url: string,
+  options?: {
+    maxWidth?: number;
+    maxHeight?: number;
+    quality?: number;
+    mimeType?: "image/jpeg" | "image/png";
+  }
+): Promise<{ dataUrl: string; format: "JPEG" | "PNG" }> {
+  const response = await fetch(url);
+  const blob = await response.blob();
+
+  const maxWidth = options?.maxWidth ?? 900;
+  const maxHeight = options?.maxHeight ?? 900;
+  const quality = options?.quality ?? 0.72;
+  const mimeType = options?.mimeType ?? "image/jpeg";
+
+  const img = await loadImageFromBlob(blob);
+  const naturalWidth = img.naturalWidth || img.width;
+  const naturalHeight = img.naturalHeight || img.height;
+
+  const ratio = Math.min(
+    1,
+    maxWidth / naturalWidth,
+    maxHeight / naturalHeight
+  );
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(naturalWidth * ratio));
+  canvas.height = Math.max(1, Math.round(naturalHeight * ratio));
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas tidak tersedia");
+
+  if (mimeType === "image/jpeg") {
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+  return {
+    dataUrl: canvas.toDataURL(mimeType, quality),
+    format: mimeType === "image/png" ? "PNG" : "JPEG",
+  };
 }
 
 async function getImageSize(dataUrl: string): Promise<{ width: number; height: number }> {
@@ -186,7 +257,12 @@ async function drawLogoContain(
   boxW: number,
   boxH: number
 ) {
-  const logoData = await urlToDataUrl(logoUrl);
+  const { dataUrl: logoData, format: logoFormat } = await urlToOptimizedImageDataUrl(logoUrl, {
+    maxWidth: 500,
+    maxHeight: 350,
+    quality: 0.75,
+    mimeType: "image/png",
+  });
   const { width: naturalWidth, height: naturalHeight } = await getImageSize(logoData);
 
   const ratio = Math.min(boxW / naturalWidth, boxH / naturalHeight);
@@ -195,7 +271,7 @@ async function drawLogoContain(
   const drawX = x + (boxW - drawW) / 2;
   const drawY = y + (boxH - drawH) / 2;
 
-  doc.addImage(logoData, "PNG", drawX, drawY, drawW, drawH);
+  doc.addImage(logoData, logoFormat, drawX, drawY, drawW, drawH);
 }
 
 function drawFallbackLogo(doc: jsPDF, x: number, y: number, w: number, h: number) {
@@ -488,6 +564,7 @@ export async function generateGuestTicketPdf({
     orientation: "portrait",
     unit: "mm",
     format: "a4",
+    compress: true,
   });
 
   const pageW = doc.internal.pageSize.getWidth();
@@ -588,7 +665,7 @@ export async function generateGuestTicketPdf({
   const qrPayload = await buildQrPayload();
   const qrData = await QRCode.toDataURL(qrPayload, {
     margin: 0,
-    width: 1400,
+    width: 420,
     color: { dark: "#000000", light: "#FFFFFF" },
   });
 
@@ -826,19 +903,19 @@ export async function generateGuestTicketPdf({
     null;
 
   let heroImageData: string | null = null;
-  let heroImageFormat: "PNG" | "JPEG" | "WEBP" = "JPEG";
+  let heroImageFormat: "PNG" | "JPEG" = "JPEG";
 
   if (heroImageUrl) {
     try {
-      heroImageData = await urlToDataUrl(heroImageUrl);
+      const optimizedHero = await urlToOptimizedImageDataUrl(heroImageUrl, {
+        maxWidth: 900,
+        maxHeight: 700,
+        quality: 0.62,
+        mimeType: "image/jpeg",
+      });
 
-      if (heroImageData.startsWith("data:image/png")) {
-        heroImageFormat = "PNG";
-      } else if (heroImageData.startsWith("data:image/webp")) {
-        heroImageFormat = "WEBP";
-      } else {
-        heroImageFormat = "JPEG";
-      }
+      heroImageData = optimizedHero.dataUrl;
+      heroImageFormat = optimizedHero.format;
     } catch {
       heroImageData = null;
     }

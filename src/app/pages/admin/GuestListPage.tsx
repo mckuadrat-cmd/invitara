@@ -2015,20 +2015,23 @@ export default function GuestListPage() {
                               )}
                         </TableCell>
 
-                        <TableCell>
-                          <button
-                            type="button"
-                            className="inline-flex items-center gap-2 hover:opacity-55 active:scale-[0.99] transition"
-                            onClick={() => cycleGuestStatus(g)}
-                            disabled={updatingStatusId === g.id}
-                            title="Klik untuk ubah status: Registered → Confirmed → Checked In"
-                          >
-                            {getStatusBadge(uiStatus)}
-                            {updatingStatusId === g.id ? (
-                              <span className="text-xs text-gray-500">Updating...</span>
-                            ) : null}
-                          </button>
-                        </TableCell>
+                      <TableCell className="whitespace-nowrap text-center">
+                        <button
+                          type="button"
+                          className="inline-flex items-center justify-center hover:opacity-70 active:scale-[0.97] transition"
+                          onClick={() => cycleGuestStatus(g)}
+                          disabled={updatingStatusId === g.id}
+                          title="Klik untuk ubah status: Registered → Confirmed → Checked In"
+                        >
+                          {updatingStatusId === g.id ? (
+                            <Loader2 className="w-4 h-4 animate-spin text-gray-500" />
+                          ) : (
+                            <div className="transition-opacity duration-200">
+                              {getStatusBadge(uiStatus)}
+                            </div>
+                          )}
+                        </button>
+                      </TableCell>
 
                         <TableCell>
                           {g.guest_type === "vip" ? (
