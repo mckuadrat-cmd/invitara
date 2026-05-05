@@ -703,12 +703,33 @@ export default function GuestListPage() {
     setPage(1);
   }, [searchQuery, statusFilter]);
 
+  const sortedFilteredGuests = useMemo(() => {
+    const list = [...filteredGuests];
+
+    if (!sortConfig) {
+      return list.sort((a, b) => {
+        const dateA = new Date(a.checkin_time || 0).getTime();
+        const dateB = new Date(b.checkin_time || 0).getTime();
+        return dateB - dateA;
+      });
+    }
+
+    return list.sort((a, b) => {
+      const aVal = getSortableValue(a, sortConfig.key);
+      const bVal = getSortableValue(b, sortConfig.key);
+
+      if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
+      if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
+      return 0;
+    });
+  }, [filteredGuests, sortConfig]);
+
   const totalPages = Math.max(1, Math.ceil(filteredGuests.length / pageSize));
 
   const paginatedGuests = useMemo(() => {
     const start = (page - 1) * pageSize;
-    return sortedGuests.slice(start, start + pageSize);
-  }, [sortedGuests, page, pageSize]);
+    return sortedFilteredGuests.slice(start, start + pageSize);
+  }, [sortedFilteredGuests, page, pageSize]);
 
   useEffect(() => {
     if (page > totalPages) {
